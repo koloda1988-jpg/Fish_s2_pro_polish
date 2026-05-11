@@ -12,6 +12,7 @@ const state = {
   phoneticEnabled: true,
   tagsEnabled: true,
   debugTtsInput: false,
+  collapsedChapters: new Set(),
 };
 
 const DEFAULT_PREP_PROMPT = `Rola: Jesteś profesjonalnym reżyserem audiobooków i specjalistą od fonetyki modelu Fish Speech S2 Pro. Twoim zadaniem jest przygotowanie tekstu książki do syntezy mowy.
@@ -260,9 +261,35 @@ function toFileUrl(filePath) {
   return `file:///${encodeURI(filePath.replace(/\\/g, "/"))}`;
 }
 
+function renderFragmentRow(f, i) {
+  const status = f.status || "pending";
+  const playLabel = state.activeAudioIdx === i ? "||" : ">";
+  const canPlay = Boolean(f.wavPath);
+  const dur = f.audioSeconds ? formatDuration(f.audioSeconds) : `~${formatDuration(f.estimatedSeconds)}`;
+  const charCount = f.text ? f.text.length : 0;
+  const charCls = charCount > 700 ? "chars-danger" : charCount > 500 ? "chars-warn" : "chars-ok";
+  return `<tr data-idx="${i}" data-status="${status}">
+    <td class="col-chk"><input type="checkbox" data-action="toggle" data-idx="${i}" ${f.selected ? "checked" : ""}></td>
+    <td class="col-nr">${i + 1}</td>
+    <td class="col-status">
+      <span class="status-pill" data-status="${status}"${status === 'error' ? ` data-action="show-error" data-idx="${i}" title="Kliknij, aby zobaczyc blad"` : ''}>
+        <span class="dot"></span>${statusLabel(status)}
+      </span>
+    </td>
+    <td class="col-play">
+      <button class="play-btn ${state.activeAudioIdx === i ? "playing" : ""}" data-action="play" data-idx="${i}" ${canPlay ? "" : "disabled"}>${playLabel}</button>
+    </td>
+    <td class="col-dur">${dur}</td>
+    <td class="col-chars ${charCls}" title="${charCount} znaków">${charCount > 700 ? "⚠ " : ""}${charCount}</td>
+    ${renderTagsCell(f.text)}
+    <td class="col-speaker">${escapeHtml(resolveVoiceForFragment(f).label || "Maciej")}</td>
+    <td class="col-text" data-action="edit" data-idx="${i}" title="Kliknij, aby edytowac">${renderTextWithBoldTags(f.text)}</td>
+  </tr>`;
+}
+
 function renderFragments() {
   const data = state.fragments;
-  els.fragCount.textContent = `${data.length} fragmentow`;
+  els.fragCount.textContent = `${data.length} fragmentów`;
 
   if (data.length === 0) {
     els.tbody.innerHTML = `
@@ -280,37 +307,42 @@ function renderFragments() {
     return;
   }
 
-  const rows = data
-    .map((f, i) => {
-      const status = f.status || "pending";
-      const playLabel = state.activeAudioIdx === i ? "||" : ">";
-      const canPlay = Boolean(f.wavPath);
-      const dur = f.audioSeconds ? formatDuration(f.audioSeconds) : `~${formatDuration(f.estimatedSeconds)}`;
-      const charCount = f.text ? f.text.length : 0;
-      const charCls = charCount > 700 ? "chars-danger" : charCount > 500 ? "chars-warn" : "chars-ok";
-      return `
-        <tr data-idx="${i}" data-status="${status}">
-          <td class="col-chk"><input type="checkbox" data-action="toggle" data-idx="${i}" ${f.selected ? "checked" : ""}></td>
-          <td class="col-nr">${i + 1}</td>
-          <td class="col-status">
-            <span class="status-pill" data-status="${status}"${status === 'error' ? ` data-action="show-error" data-idx="${i}" title="Kliknij, aby zobaczyc blad"` : ''}>
-              <span class="dot"></span>${statusLabel(status)}
-            </span>
-          </td>
-          <td class="col-play">
-            <button class="play-btn ${state.activeAudioIdx === i ? "playing" : ""}" data-action="play" data-idx="${i}" ${canPlay ? "" : "disabled"}>${playLabel}</button>
-          </td>
-          <td class="col-dur">${dur}</td>
-          <td class="col-chars ${charCls}" title="${charCount} znaków">${charCount > 700 ? "⚠ " : ""}${charCount}</td>
-          ${renderTagsCell(f.text)}
-          <td class="col-speaker">${escapeHtml(resolveVoiceForFragment(f).label || "Maciej")}</td>
-          <td class="col-text" data-action="edit" data-idx="${i}" title="Kliknij, aby edytowac">${renderTextWithBoldTags(f.text)}</td>
-        </tr>
-      `;
-    })
-    .join("");
+  // Grupuj wg rozdziału
+  const groupMap = new Map();
+  data.forEach((f, i) => {
+    const ci = f.chapterIdx !== undefined ? f.chapterIdx : 0;
+    if (!groupMap.has(ci)) {
+      groupMap.set(ci, { title: f.chapterTitle || "Sekcja", idx: ci, indices: [] });
+    }
+    groupMap.get(ci).indices.push(i);
+  });
+  const groups = [...groupMap.values()].sort((a, b) => a.idx - b.idx);
+  const multiChapter = groups.length > 1;
 
-  els.tbody.innerHTML = rows;
+  let html = "";
+  for (const group of groups) {
+    if (multiChapter) {
+      const total = group.indices.length;
+      const done = group.indices.filter(i => data[i].status === "success" || data[i].status === "error").length;
+      const pct = total > 0 ? Math.round(done / total * 100) : 0;
+      const collapsed = state.collapsedChapters.has(group.idx);
+      html += `<tr class="chapter-header-row${collapsed ? ' collapsed' : ''}" data-chapter="${group.idx}" data-action="toggle-chapter">
+        <td colspan="9" class="chapter-header-cell">
+          <span class="chapter-arrow">${collapsed ? '▶' : '▼'}</span>
+          <b>Rozdział ${group.idx + 1}</b>
+          <span class="chapter-subtitle muted">${escapeHtml(group.title)}</span>
+          <span class="chapter-count muted" style="margin-left:8px;font-size:11px;">${done}/${total}</span>
+          <div class="chapter-progress-wrap"><div class="chapter-progress-fill" style="width:${pct}%"></div></div>
+        </td>
+      </tr>`;
+      if (collapsed) continue;
+    }
+    for (const i of group.indices) {
+      html += renderFragmentRow(data[i], i);
+    }
+  }
+
+  els.tbody.innerHTML = html;
   updateProgress();
   updateHeaderCheckbox();
   updateButtonsState();
@@ -531,20 +563,45 @@ function renderVoiceList(voices) {
   if (els.voiceListHint) els.voiceListHint.style.display = "none";
   const activeVoice = els.serverRefAudio?.value || "";
   els.voiceList.innerHTML = voices.map(v => {
-    const isActive = activeVoice.includes(v.name);
-    return `<div class="voice-card">
-      <div class="voice-card-name">${escapeHtml(v.name)} ${isActive ? '<span class="voice-active-badge">aktywny</span>' : ""}</div>
-      <div class="voice-card-meta">${v.sample_count} próbek · ${escapeHtml(v.source || "")}</div>
+    const isActive = activeVoice && (activeVoice.includes(`\\${v.name}.wav`) || activeVoice.includes(`/${v.name}.wav`) || activeVoice.includes(v.name));
+    const en = (s) => escapeHtml(s || "");
+    const escapedName = en(v.name);
+    const escapedSample = en(v.first_sample || "");
+    const transcript = v.transcript ? `<div class="voice-card-transcript">${en(v.transcript.slice(0, 140))}…</div>` : "";
+    const playBtn = escapedSample
+      ? `<button class="btn btn-ghost voice-play-btn" title="Odtwórz próbkę" onclick="playVoiceSample('${escapedSample}')">▶</button>`
+      : "";
+    return `<div class="voice-card${isActive ? ' voice-card--active' : ''}">
+      <div class="voice-card-header">
+        ${playBtn}
+        <div class="voice-card-name">${escapedName}${isActive ? ' <span class="voice-active-badge">AKTYWNY</span>' : ""}</div>
+      </div>
+      <div class="voice-card-meta">${v.sample_count || 1} próbek · ${en(v.source || "manual/yt")}</div>
+      ${transcript}
       <div class="voice-card-actions">
-        <button class="btn btn-secondary" style="font-size:11px;padding:3px 10px;"
-          onclick="activateVoice('${escapeHtml(v.name)}', '${escapeHtml(v.first_sample || "")}')">
-          ${isActive ? "✓ Aktywny" : "Wybierz"}
+        <button class="btn ${isActive ? 'btn-secondary' : 'btn-primary'}" style="font-size:11px;padding:3px 12px;"
+          onclick="activateVoice('${escapedName}', '${escapedSample}')">
+          ${isActive ? "✓ Aktywny" : "Ustaw domyślnie"}
         </button>
-        <button class="btn btn-ghost" style="font-size:11px;padding:3px 10px;color:var(--error);"
-          onclick="deleteVoice('${escapeHtml(v.name)}')">Usuń</button>
+        <button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;" title="Zmień nazwę"
+          onclick="renameVoicePrompt('${escapedName}')">✏</button>
+        <button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;color:var(--error);" title="Usuń"
+          onclick="deleteVoice('${escapedName}')">🗑</button>
       </div>
     </div>`;
   }).join("");
+}
+
+async function renameVoicePrompt(name) {
+  const newName = prompt(`Nowa nazwa lektora (było: "${name}"):`, name);
+  if (!newName || newName.trim() === name || !newName.trim()) return;
+  try {
+    await window.api.py("rename_voice", { voice_name: name, new_name: newName.trim(), voices_dir: voicesDir() });
+    toast(`Zmieniono: "${name}" → "${newName.trim()}"`, "success");
+    refreshVoiceList();
+  } catch (err) {
+    toast(`Błąd zmiany nazwy: ${err.message}`, "error");
+  }
 }
 
 async function activateVoice(name, firstSample) {
@@ -694,59 +751,54 @@ async function loadAndSplit() {
     return;
   }
   const selected = getChapterIndex();
-  let textToSplit = "";
-  let selectedLabel = "";
-
   if (selected.length === 0) {
     toast("Zaznacz przynajmniej jedną sekcję.", "error");
     return;
   }
 
+  // Buduj listę rozdziałów do podziału z zachowaniem indeksów
+  let chaptersToSplit;
   if (selected.includes("all")) {
-    textToSplit = state.chapters
-      .map((c) => `## ${(c && c.title) ? c.title : "Sekcja"}\n${(c && c.text) ? c.text : ""}`)
-      .join("\n\n");
-    selectedLabel = "Całość";
+    chaptersToSplit = state.chapters.map((c, i) => ({ ...c, _origIdx: i }));
   } else {
     const indices = selected.map(Number).filter(n => Number.isFinite(n));
-    const picked = indices.map(i => state.chapters[i]).filter(Boolean);
-    if (picked.length === 0) {
-      toast("Wybierz sekcję.", "error");
-      return;
-    }
-    selectedLabel = picked.map(c => c.title || "Sekcja").join(" + ");
-    textToSplit = picked
-      .map((c) => `## ${c.title || "Sekcja"}\n${c.text || ""}`)
-      .join("\n\n");
+    chaptersToSplit = indices.map(i => ({ ...state.chapters[i], _origIdx: i })).filter(Boolean);
   }
-
-  if (!textToSplit.trim()) {
+  if (chaptersToSplit.length === 0 || chaptersToSplit.every(c => !(c.text || "").trim())) {
     toast("Brak tekstu do podziału.", "error");
     return;
   }
 
+  const fragSec = parseInt(els.fragSlider?.value, 10) || 25;
+  const targetChars = fragSec * 15;
+  const allFragments = [];
+
   try {
-    const fragSec = parseInt(els.fragSlider && els.fragSlider.value, 10) || 25;
-    const targetChars = fragSec * 15;   // CHARS_PER_SECOND ~= 15 dla polskiego TTS
-    const split = await window.api.py("split_text", {
-      text: textToSplit,
-      target_chars: targetChars,
-    });
-    const fragments = split.fragments || [];
-    state.fragments = fragments.map((text) => ({
-      text,
-      selected: true,
-      status: "pending",
-      wavPath: null,
-      audioSeconds: 0,
-      estimatedSeconds: estimateSecondsFromText(text),
-    }));
+    for (const chapter of chaptersToSplit) {
+      if (!(chapter.text || "").trim()) continue;
+      const res = await window.api.py("split_text", { text: chapter.text, target_chars: targetChars });
+      for (const text of (res.fragments || [])) {
+        allFragments.push({
+          text,
+          selected: true,
+          status: "pending",
+          wavPath: null,
+          audioSeconds: 0,
+          estimatedSeconds: estimateSecondsFromText(text),
+          chapterTitle: chapter.title || `Sekcja ${chapter._origIdx + 1}`,
+          chapterIdx: chapter._origIdx,
+        });
+      }
+    }
+
+    state.fragments = allFragments;
     state.startedAt = null;
+    state.collapsedChapters = new Set();
     els.statStart.textContent = "-";
     els.statEnd.textContent = "-";
     els.statEta.textContent = "-";
 
-    // Sprawdź które fragmenty mają już wygenerowane pliki audio
+    // Sprawdź gotowe pliki audio
     try {
       const scan = await window.api.py("scan_existing_wavs", {
         workdir: state.workdir,
@@ -764,15 +816,14 @@ async function loadAndSplit() {
           foundCount++;
         }
       }
-      if (foundCount > 0) {
-        toast(`Znaleziono ${foundCount} gotowych fragmentów — odznaczono.`, "success");
-      }
-    } catch (_) { /* skan nieudany — ignoruj, nie blokuj */ }
+      if (foundCount > 0) toast(`Znaleziono ${foundCount} gotowych fragmentów — odznaczono.`, "success");
+    } catch (_) {}
 
     renderFragments();
-    toast(`Podzielono ${selectedLabel} na ${state.fragments.length} fragmentow.`, "success");
+    const label = selected.includes("all") ? "Całość" : chaptersToSplit.map(c => c.title || "Sekcja").join(" + ");
+    toast(`Podzielono ${label} na ${state.fragments.length} fragmentów.`, "success");
   } catch (err) {
-    toast(`Blad dzielenia: ${err.message}`, "error");
+    toast(`Błąd dzielenia: ${err.message}`, "error");
   }
 }
 
@@ -1363,6 +1414,19 @@ function attachEvents() {
     const target = evt.target.closest("[data-action]");
     if (!target) return;
     const action = target.dataset.action;
+
+    // toggle-chapter nie potrzebuje idx fragmentu
+    if (action === "toggle-chapter") {
+      const ci = Number(target.closest("tr").dataset.chapter);
+      if (state.collapsedChapters.has(ci)) {
+        state.collapsedChapters.delete(ci);
+      } else {
+        state.collapsedChapters.add(ci);
+      }
+      renderFragments();
+      return;
+    }
+
     const idx = Number(target.dataset.idx);
     if (!Number.isFinite(idx)) return;
 

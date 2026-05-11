@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; media-src file: 'self';">
+  <title>Audiobook Generator</title>
+  <link rel="stylesheet" href="renderer.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-left">
+      <div class="logo">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 18v-6a9 9 0 0 1 18 0v6"/>
+          <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>
+        </svg>
+        <span>Audiobook Generator</span>
+      </div>
+      <span class="badge" id="backend-status">backend...</span>
+    </div>
+    <div class="header-right">
+      <button class="btn btn-secondary" id="btn-voice-creation" title="Tworzenie profili lektorów z pliku audio">
+        🎙 Lektorzy
+      </button>
+      <button class="btn btn-secondary" id="btn-prepare-book" title="Przygotowanie ksiazki przez Gemini">
+        Przygotowanie ksiazki
+      </button>
+      <button class="btn btn-ghost" id="btn-open-folder" title="Otworz folder z WAV-ami">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+        </svg>
+        Folder WAV/MP3
+      </button>
+    </div>
+  </header>
+
+  <!-- Pasek konfiguracji -->
+  <section class="config-bar">
+    <div class="field">
+      <label>Plik (PDF/EPUB/TXT)</label>
+      <div class="input-with-button">
+        <input type="text" id="book-path" placeholder="Wybierz plik ksiazki..." readonly>
+        <button class="btn btn-secondary" id="btn-pick-book">Wybierz</button>
+      </div>
+    </div>
+    <div class="field field-narrow">
+      <label>Katalog roboczy</label>
+      <input type="hidden" id="workdir" value="C:\Users\kolod\Documents\Claude\Projects\Audiobook\Audiobook (1)\wersja 2">
+      <button class="btn btn-secondary" id="btn-default-workdir" style="width:100%;" title="Otwórz katalog programu w eksploratorze">📁 Katalog programu</button>
+    </div>
+    <div class="field field-narrow">
+      <label>Książka (Audiobooks/...)</label>
+      <div class="input-with-button">
+        <select id="subdir" style="flex:1;"><option value="Silos">Silos</option></select>
+        <button class="btn btn-secondary" id="btn-pick-subdir" title="Dodaj lub odśwież listę">Wybierz</button>
+      </div>
+    </div>
+    <div class="field field-narrow">
+      <label>Wczytaj plik (drag &amp; drop)</label>
+      <div id="main-dropzone" title="Przeciągnij plik TXT / EPUB / PDF">
+        <span id="main-dropzone-label">&#128196; Upuść TXT / EPUB / PDF</span>
+        <input type="file" id="main-file-input" accept=".txt,.epub,.pdf" style="display:none;">
+      </div>
+    </div>
+    <div class="field" style="grid-column: 1 / -1;">
+      <label>Części <span style="font-weight:400;text-transform:none;letter-spacing:0;opacity:.7;">(Ctrl+klik = kilka, Shift+klik = zakres)</span></label>
+      <div style="display:flex;gap:6px;align-items:flex-end;">
+        <select id="chapter-select" multiple size="6" disabled style="flex:1;"></select>
+        <button class="btn btn-primary" id="btn-load-split" disabled style="white-space:nowrap;flex-shrink:0;">Wczytaj i podziel</button>
+      </div>
+    </div>
+    <div class="field" style="grid-column: 1 / -1;">
+      <label>Dlugosc fragmentu: <b id="frag-sec-label">25s</b>
+        <span class="muted" id="frag-chars-label" style="margin-left:6px;">(~375 zn)</span>
+      </label>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span class="muted">15s</span>
+        <input type="range" id="frag-slider" min="15" max="900" value="25" step="1"
+               style="flex:1; height:24px;">
+        <span class="muted">15min</span>
+        <span style="margin-left:12px; color:#aab0bc;">Minuty:</span>
+        <input type="number" id="frag-minutes" min="0.25" max="15" step="0.25" value="0.42"
+               style="width:80px; padding:4px; background:#1f2330; color:#e8eaed; border:1px solid #2a3148; border-radius:4px;">
+      </div>
+    </div>
+    <div class="field field-flags">
+      <label>Przetwarzanie TTS</label>
+      <label class="inline-flag">
+        <input type="checkbox" id="chk-phonetic" checked>
+        <span>Hard-Fix fonetyki</span>
+      </label>
+      <label class="inline-flag">
+        <input type="checkbox" id="chk-tags" checked>
+        <span>Tagi [pause]</span>
+      </label>
+      <label class="inline-flag">
+        <input type="checkbox" id="chk-debug-tts">
+        <span>Debug: log [TTS Input]</span>
+      </label>
+    </div>
+  </section>
+
+  <!-- ====== SEKCJA: Server TTS (s2.cpp HTTP) ====== -->
+  <section class="config-bar" id="server-section" style="border-top:1px solid #2a3148;padding-top:8px;">
+    <div class="field" style="grid-column: 1 / -1;">
+      <label style="font-weight:600; color:#8aa9ff; cursor:pointer; user-select:none;" id="tts-server-toggle">
+        ▶ Tryb TTS
+        <span class="muted" style="font-weight:400; font-size:11px; margin-left:8px;">(Server pipeline, URL, endpoint, reference audio)</span>
+      </label>
+    </div>
+    <div id="tts-server-body" style="display:none; grid-column: 1 / -1;">
+      <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; padding-top:8px;">
+        <div class="field field-flags" style="grid-column: 1 / -1;">
+          <label class="inline-flag">
+            <input type="checkbox" id="chk-server-mode" checked>
+            <span><b>Server pipeline</b> (model raz w VRAM, GPU+CPU pipeline)</span>
+          </label>
+          <span class="muted" id="server-status-badge">(?)</span>
+        </div>
+        <div class="field field-narrow">
+          <label>URL serwera s2.cpp</label>
+          <input type="text" id="server-url" value="http://127.0.0.1:8080">
+        </div>
+        <div class="field field-narrow">
+          <label>Endpoint</label>
+          <input type="text" id="server-endpoint" value="/generate">
+        </div>
+        <div class="field field-narrow">
+          <label>GPU workers</label>
+          <input type="number" id="server-gpu-workers" value="1" min="1" max="6" step="1">
+        </div>
+        <div class="field field-narrow">
+          <label>Timeout/req (s)</label>
+          <input type="number" id="server-timeout" value="1800" min="60" max="7200" step="60">
+        </div>
+        <div class="field field-narrow">
+          <label>Format wyjsciowy</label>
+          <div style="display:flex;gap:12px;align-items:center;padding-top:4px;">
+            <label class="inline-flag" style="margin:0;">
+              <input type="radio" name="output-format" id="fmt-wav" value="wav" disabled>
+              <span>WAV</span>
+            </label>
+            <label class="inline-flag" style="margin:0;">
+              <input type="radio" name="output-format" id="fmt-mp3" value="mp3" checked>
+              <span>MP3</span>
+            </label>
+            <span class="muted" style="font-size:11px;">(MP3 ~10x mniejszy)</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Reference audio (wzgl. workdir)</label>
+          <input type="text" id="server-ref-audio" value="Lectors\\sample_glos_macieja_10s.wav">
+        </div>
+        <div class="field">
+          <label>Reference text (wzgl. workdir)</label>
+          <input type="text" id="server-ref-text" value="Lectors\\sample_glos_macieja_10s.txt">
+        </div>
+        <div class="field" style="grid-column: 1 / -1;">
+          <label>Mapowanie postać → lektor</label>
+          <div class="speaker-voice-map-wrap">
+            <div id="speaker-voice-map-ui" class="speaker-voice-map-track">
+              <!-- Generowane dynamicznie: kafelki postać/lektor -->
+            </div>
+            <button class="speaker-add-btn" id="btn-add-speaker" title="Dodaj postać" aria-label="Dodaj postać">+</button>
+          </div>
+          <textarea id="speaker-voice-map" rows="2" style="width:100%; margin-top:8px; display:none;" placeholder="Narrator=Maciej&#10;Holston=Piotr&#10;Juliette=Krystyna"></textarea>
+        </div>
+        <div class="field field-narrow">
+          <label>&nbsp;</label>
+          <button class="btn btn-secondary" id="btn-test-server">Test serwera</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== SEKCJA: Advanced TTS Settings ====== -->
+  <section class="config-bar" id="tts-advanced-section" style="border-top:1px solid #2a3148;padding-top:8px;">
+    <div class="field" style="grid-column: 1 / -1;">
+      <label style="font-weight:600; color:#8aa9ff; cursor:pointer;" id="tts-advanced-toggle">
+        ▶ Advanced TTS Settings
+        <span class="muted" style="font-weight:400; font-size:11px; margin-left:8px;">(temperatura, top-p, repetition, chunk length, max tokens)</span>
+      </label>
+    </div>
+    <div id="tts-advanced-body" style="display:none; grid-column: 1 / -1;">
+      <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; padding-top:8px;">
+
+        <div class="field">
+          <label>Temperature <b id="tts-temperature-val">0.80</b></label>
+          <input type="range" id="tts-temperature" min="0.1" max="1.0" step="0.05" value="0.8"
+                 style="width:100%;">
+          <div class="muted" style="font-size:11px;">Kreatywnosc syntezy. Wyzej = bardziej zroznicowane wymowienie.</div>
+        </div>
+
+        <div class="field">
+          <label>Top-P <b id="tts-top-p-val">0.80</b></label>
+          <input type="range" id="tts-top-p" min="0.1" max="1.0" step="0.05" value="0.8"
+                 style="width:100%;">
+          <div class="muted" style="font-size:11px;">Nucleus sampling. Nizej = bardziej konsekwentna wymowa.</div>
+        </div>
+
+        <div class="field">
+          <label>Repetition Penalty <b id="tts-rep-penalty-val">1.10</b></label>
+          <input type="range" id="tts-rep-penalty" min="0.9" max="2.0" step="0.05" value="1.1"
+                 style="width:100%;">
+          <div class="muted" style="font-size:11px;">Kara za powtorzenia. Wyzej = mniejsze ryzyko petli audio.</div>
+        </div>
+
+        <div class="field">
+          <label>Chunk Length <b id="tts-chunk-length-val">512</b></label>
+          <input type="range" id="tts-chunk-length" min="100" max="1024" step="10" value="512"
+                 style="width:100%;">
+          <div class="muted" style="font-size:11px;">Dlugosc kawalkow tekstu dla LM. 200 = stabilny balans.</div>
+        </div>
+
+        <div class="field">
+          <label>Max New Tokens <b id="tts-max-tokens-val">1024</b></label>
+          <input type="range" id="tts-max-tokens" min="0" max="4096" step="64" value="1024"
+                 style="width:100%;">
+          <div class="muted" style="font-size:11px;">0 = bez limitu (auto). Zwieksz tylko gdy fragment jest uciety.</div>
+        </div>
+
+      </div>
+      <div class="tts-save-row">
+        <button class="btn btn-dark" id="btn-save-tts-settings" title="Zapisz ustawienia Advanced TTS dla kolejnych uruchomień programu">Zapisz</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Glowna lista fragmentow -->
+  <main class="main-area">
+    <div class="list-toolbar">
+      <div class="list-toolbar-left">
+        <button class="btn btn-ghost" id="btn-select-all">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 11 12 14 22 4"/>
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+          </svg>
+          Zaznacz wszystko
+        </button>
+        <button class="btn btn-ghost" id="btn-deselect-all">Odznacz</button>
+        <button class="btn btn-ghost" id="btn-deselect-done" title="Odznacz fragmenty które już zostały wygenerowane (status: gotowe)">Odznacz gotowe</button>
+        <span class="separator"></span>
+        <span class="muted" id="frag-count">0 fragmentow</span>
+        <span class="separator"></span>
+        <input type="number" id="select-n-input" min="1" max="9999" placeholder="Liczba" title="Zaznacz wskazaną liczbę niegotowych fragmentów od początku">
+        <button class="btn btn-dark" id="btn-select-n" title="Zaznacz wskazaną liczbę niegotowych fragmentów (pomija gotowe)">Zaznacz</button>
+        <span class="select-n-label">Zaznacz dowolną ilość fragmentów</span>
+      </div>
+      <div class="list-toolbar-right">
+        <button class="btn btn-ghost" id="btn-first" title="Na początek (Home)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M6 6l12 6-12 6z"/>
+            <rect x="3" y="4" width="2" height="16"/>
+          </svg>
+        </button>
+        <button class="btn btn-ghost" id="btn-last" title="Na koniec (End)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M18 18L6 12l12-6z"/>
+            <rect x="19" y="4" width="2" height="16"/>
+          </svg>
+        </button>
+        <span class="separator"></span>
+        <button class="btn btn-success" id="btn-run">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="6 4 20 12 6 20 6 4"/>
+          </svg>
+          Uruchom zaznaczone
+        </button>
+        <button class="btn btn-warning" id="btn-stop" disabled>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="6" width="12" height="12" rx="2"/>
+          </svg>
+          STOP
+        </button>
+        <span class="separator"></span>
+        <input type="number" id="goto-frag-input" min="1" max="9999" placeholder="Nr" title="Skocz do fragmentu" style="width:58px;">
+        <button class="btn btn-ghost" id="btn-goto-frag" title="Skocz do fragmentu o podanym numerze">Szukaj</button>
+        <span class="separator"></span>
+        <button class="btn btn-secondary" id="btn-split-selected" title="Podziel za długie zaznaczone fragmenty na mniejsze">✂ Podziel zaznaczone</button>
+        <button class="btn btn-secondary" id="btn-merge-selected">Scal zaznaczone</button>
+        <button class="btn btn-secondary" id="btn-merge-all">Scal wszystkie</button>
+      </div>
+    </div>
+
+    <div class="fragment-list-wrapper">
+      <table class="fragment-table" id="fragment-table">
+        <thead>
+          <tr>
+            <th class="col-chk">
+              <input type="checkbox" id="header-checkbox">
+            </th>
+            <th class="col-nr">#</th>
+            <th class="col-status">Status</th>
+            <th class="col-play">Play</th>
+            <th class="col-dur">Czas</th>
+            <th class="col-chars" title="Długość fragmentu w znakach">Znaki</th>
+            <th class="col-tags">Tagi</th>
+            <th class="col-speaker">Kto czyta</th>
+            <th class="col-text">Tekst</th>
+          </tr>
+        </thead>
+        <tbody id="fragment-tbody">
+          <tr class="empty-state">
+            <td colspan="9">
+              <div class="empty-state-content">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                </svg>
+                <p>Wczytaj plik ksiazki, zeby zaczac.</p>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- Statystyki + progress -->
+  <footer class="stats-bar">
+    <div class="progress-row">
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+      </div>
+      <span class="progress-label" id="progress-label">0/0 (0%)</span>
+    </div>
+    <div class="stats-row">
+      <div class="stat">
+        <span class="stat-label">Start</span>
+        <span class="stat-value" id="stat-start">-</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Koniec</span>
+        <span class="stat-value" id="stat-end">-</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">ETA</span>
+        <span class="stat-value" id="stat-eta">-</span>
+      </div>
+      <div class="stat stat-emphasized">
+        <span class="stat-label">Total Time</span>
+        <span class="stat-value" id="stat-total">00:00</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Modal: edycja fragmentu -->
+  <div class="modal" id="edit-modal" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-window">
+      <div class="modal-header">
+        <h3>Fragment <span id="edit-modal-idx">#-</span></h3>
+        <button class="btn btn-ghost btn-icon" id="edit-close">×</button>
+      </div>
+      <div class="modal-body">
+        <label class="muted small">Tekst (zostanie wyslany do TTS):</label>
+        <textarea id="edit-text" rows="6"></textarea>
+        <pre class="code-block" id="edit-command" style="display:none;"></pre>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="edit-cancel">Anuluj</button>
+        <button class="btn btn-primary" id="edit-save">Zapisz tekst</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: szczegoly bledu fragmentu -->
+  <div class="modal" id="error-modal" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-window modal-window--error">
+      <div class="modal-header">
+        <h3>Błąd generowania — Fragment <span id="error-modal-idx">#-</span></h3>
+        <button class="btn btn-ghost btn-icon" id="error-close">×</button>
+      </div>
+      <div class="modal-body">
+        <label class="muted small">Treść błędu:</label>
+        <pre class="code-block" id="error-detail" style="white-space:pre-wrap;word-break:break-word;max-height:300px;overflow-y:auto;color:var(--error);background:var(--error-bg);"></pre>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="error-ok">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: przygotowanie ksiazki przez Gemini -->
+  <div class="modal" id="prepare-modal" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-window modal-window--gemini">
+      <div class="modal-header">
+        <h3>✨ Przygotowanie książki (Gemini Auto-Tagger)</h3>
+        <button class="btn btn-ghost btn-icon" id="prepare-close">×</button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:12px;">
+
+        <!-- Wiersz 1: klucz API + model -->
+        <div style="display:grid;grid-template-columns:1fr 280px;gap:8px;align-items:end;">
+          <div>
+            <label class="muted small">Klucz API Gemini</label>
+            <input type="password" id="prepare-api-key" placeholder="AIza..." style="width:100%;">
+          </div>
+          <div>
+            <label class="muted small">Model</label>
+            <select id="prepare-model" style="width:100%;">
+              <option value="gemini-2.5-pro-exp-03-25">gemini-2.5-pro-exp-03-25</option>
+              <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
+              <option value="gemini-1.5-flash-latest">gemini-1.5-flash</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Wiersz 2: plik wejściowy z drag&drop -->
+        <div>
+          <label class="muted small">Plik wejściowy (PDF / EPUB / TXT) — <span id="prepare-input-status" style="color:#8aa9ff;">nie wybrano</span></label>
+          <div id="prepare-dropzone" style="
+            border:2px dashed #2a3148; border-radius:8px; padding:18px;
+            text-align:center; cursor:pointer; color:#8a8f99; font-size:13px;
+            transition:border-color .15s,background .15s; margin-top:4px;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:6px;">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            Upuść plik tutaj lub <u style="cursor:pointer;" id="prepare-browse-link">kliknij, aby wybrać</u>
+            <input type="file" id="prepare-file-input" accept=".pdf,.epub,.txt" style="display:none;">
+          </div>
+        </div>
+
+        <!-- Wiersz 3: plik wyjściowy -->
+        <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end;">
+          <div>
+            <label class="muted small">Nazwa pliku wyjściowego (.txt)</label>
+            <input type="text" id="prepare-output-name" placeholder="ksiazka_tagged.txt" style="width:100%;">
+          </div>
+          <button class="btn btn-secondary" id="prepare-save-as-btn" title="Wybierz lokalizację zapisu">📂 Zapisz jako…</button>
+        </div>
+
+        <!-- Wiersz 4: prompt + chat -->
+        <div style="display:flex;flex-direction:column;gap:4px;flex:1;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <label class="muted small">Prompt / instrukcja dla Gemini</label>
+            <button class="btn btn-ghost" id="prepare-reset-prompt" style="font-size:11px;padding:2px 8px;">Reset domyślny</button>
+          </div>
+          <textarea id="prepare-prompt" rows="8" placeholder="Wklej prompt przygotowania książki..." style="resize:vertical;min-height:120px;"></textarea>
+        </div>
+
+        <!-- Wiersz 5: chat log -->
+        <div id="prepare-chat-log" style="
+          display:none; flex-direction:column; gap:6px;
+          max-height:200px; overflow-y:auto;
+          background:#f0f0f0; border:1px solid #ccc; border-radius:6px;
+          padding:10px; font-size:12px; font-family:monospace; color:#1a1a1a;">
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <div style="font-size:11px;color:#5b6070;" id="prepare-status-line">Gotowy.</div>
+        <button class="btn btn-secondary" id="prepare-cancel">Anuluj</button>
+        <button class="btn btn-primary" id="prepare-run">✨ Otaguj i zapisz plik</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Voice Creation -->
+  <div class="modal" id="voice-modal" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-window modal-window--voice">
+      <div class="modal-header">
+        <h3>🎙 Lektorzy — Voice Creation</h3>
+        <button class="btn btn-ghost btn-icon" id="voice-close">×</button>
+      </div>
+      <div class="modal-body voice-modal-body">
+        <!-- LEWA: tworzenie nowego lektora -->
+        <div class="voice-col-left">
+          <h4 style="margin:0;font-size:13px;color:#8aa9ff;">Nowy lektor</h4>
+
+          <div>
+            <label class="muted small">Nazwa lektora</label>
+            <input type="text" id="voice-name" placeholder="np. Maciej, Juliette…" style="width:100%;">
+          </div>
+
+          <div>
+            <label class="muted small">Plik źródłowy (MP3 / WAV) — <span id="voice-input-status" style="color:#8aa9ff;">nie wybrano</span></label>
+            <div id="voice-dropzone">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:6px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              Upuść MP3/WAV lub <u id="voice-browse-link" style="cursor:pointer;">kliknij</u>
+              <input type="file" id="voice-file-input" accept=".mp3,.wav,.flac,.ogg,.m4a" style="display:none;">
+            </div>
+          </div>
+
+          <div class="voice-yt-row">
+            <input type="text" id="voice-youtube-url" placeholder="Wklej link YouTube (audio)" style="width:100%;">
+            <button class="btn btn-dark" id="btn-voice-download">Pobierz MP3</button>
+          </div>
+
+          <div class="voice-source-preview-wrap">
+            <audio id="voice-source-player" controls preload="metadata" style="width:100%;"></audio>
+            <div class="voice-start-tools">
+              <button class="btn btn-ghost" id="btn-voice-set-start" type="button">Ustaw start z odtwarzacza</button>
+            </div>
+            <div class="voice-start-row">
+              <label class="muted small">Start fragmentu:</label>
+              <input type="range" id="voice-start-sec" min="0" max="0" step="0.1" value="0" style="width:100%;">
+              <input type="number" id="voice-start-input" min="0" step="0.1" value="0" style="width:90px;">
+              <span class="muted small" id="voice-clip-end">koniec: 0.0s</span>
+              <span class="muted small" id="voice-source-duration">plik: 0.0s</span>
+            </div>
+          </div>
+
+          <div class="voice-controls-grid">
+            <div>
+              <label class="muted small">Długość próbki (s): <b id="voice-seg-val">10</b></label>
+              <input type="range" id="voice-seg-dur" min="5" max="120" step="1" value="10" style="width:100%;">
+              <div class="voice-seg-presets">
+                <button class="btn btn-ghost" type="button" data-action="voice-set-seg" data-seg="10">10s</button>
+                <button class="btn btn-ghost" type="button" data-action="voice-set-seg" data-seg="30">30s</button>
+                <button class="btn btn-ghost" type="button" data-action="voice-set-seg" data-seg="60">60s</button>
+              </div>
+            </div>
+            <div class="voice-split-btn-wrap">
+              <button class="btn btn-primary" id="voice-split-btn" style="width:100%;" disabled>✂ Utnij i zapisz WAV+TXT</button>
+            </div>
+          </div>
+
+          <!-- Log postępu -->
+          <div id="voice-log" class="voice-log"></div>
+
+          <!-- Próbki audio -->
+          <div id="voice-samples-preview" class="voice-samples-preview"></div>
+        </div>
+
+        <!-- PRAWA: istniejący lektorzy -->
+        <div class="voice-col-right">
+          <h4 style="margin:0;font-size:13px;color:#8aa9ff;">Zapisani lektorzy</h4>
+          <div id="voice-list" class="voice-list"></div>
+          <div style="font-size:11px;color:#5b6070;" id="voice-list-hint">Brak lektorów.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toasty / log -->
+  <div class="toast-container" id="toasts"></div>
+
+  <!-- Ukryty audio element do odtwarzania -->
+  <audio id="audio-player" hidden></audio>
+  <audio id="voice-preview-player" hidden></audio>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
