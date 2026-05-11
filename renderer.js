@@ -58,6 +58,8 @@ const els = {
   selectNInput: document.getElementById("select-n-input"),
     btnFirst: document.getElementById("btn-first"),
     btnLast: document.getElementById("btn-last"),
+    btnPrev: document.getElementById("btn-prev"),
+    btnNext: document.getElementById("btn-next"),
   // Slider dlugosci fragmentu
   fragSlider: document.getElementById("frag-slider"),
   fragSecLabel: document.getElementById("frag-sec-label"),
@@ -326,13 +328,18 @@ function renderFragments() {
       const done = group.indices.filter(i => data[i].status === "success" || data[i].status === "error").length;
       const pct = total > 0 ? Math.round(done / total * 100) : 0;
       const collapsed = state.collapsedChapters.has(group.idx);
-      html += `<tr class="chapter-header-row${collapsed ? ' collapsed' : ''}" data-chapter="${group.idx}" data-action="toggle-chapter">
+      const allSelected = group.indices.length > 0 && group.indices.every(i => data[i].selected);
+      const someSelected = !allSelected && group.indices.some(i => data[i].selected);
+      html += `<tr class="chapter-header-row${collapsed ? ' collapsed' : ''}" data-chapter="${group.idx}">
         <td colspan="9" class="chapter-header-cell">
-          <span class="chapter-arrow">${collapsed ? '▶' : '▼'}</span>
-          <b>Rozdział ${group.idx + 1}</b>
-          <span class="chapter-subtitle muted">${escapeHtml(group.title)}</span>
-          <span class="chapter-count muted" style="margin-left:8px;font-size:11px;">${done}/${total}</span>
-          <div class="chapter-progress-wrap"><div class="chapter-progress-fill" style="width:${pct}%"></div></div>
+          <div class="chapter-header-inner">
+            <input type="checkbox" class="chapter-chk" data-action="toggle-chapter-select" data-chapter="${group.idx}" ${allSelected ? 'checked' : ''} ${someSelected ? 'data-indeterminate="1"' : ''} title="Zaznacz/odznacz cały rozdział">
+            <span class="chapter-arrow" data-action="toggle-chapter">${collapsed ? '▶' : '▼'}</span>
+            <b data-action="toggle-chapter">Rozdział ${group.idx + 1}</b>
+            <span class="chapter-subtitle muted" data-action="toggle-chapter">${escapeHtml(group.title)}</span>
+            <span class="chapter-count muted">${done}/${total}</span>
+            <div class="chapter-progress-wrap" data-action="toggle-chapter"><div class="chapter-progress-fill" style="width:${pct}%"></div></div>
+          </div>
         </td>
       </tr>`;
       if (collapsed) continue;
@@ -343,6 +350,10 @@ function renderFragments() {
   }
 
   els.tbody.innerHTML = html;
+  // Fix indeterminate state on chapter checkboxes (can't be set via HTML attribute)
+  els.tbody.querySelectorAll(".chapter-chk[data-indeterminate]").forEach(chk => {
+    chk.indeterminate = true;
+  });
   updateProgress();
   updateHeaderCheckbox();
   updateButtonsState();
@@ -1394,16 +1405,35 @@ function attachEvents() {
   }
 
   els.btnFirst.addEventListener("click", () => {
-    if (els.tbody.firstElementChild) {
-      els.tbody.firstElementChild.scrollIntoView({ behavior: "smooth" });
-    }
+    const first = els.tbody.querySelector("tr[data-idx]");
+    if (first) first.scrollIntoView({ behavior: "smooth", block: "center" });
   });
 
   els.btnLast.addEventListener("click", () => {
-    if (els.tbody.lastElementChild) {
-      els.tbody.lastElementChild.scrollIntoView({ behavior: "smooth" });
-    }
+    const rows = els.tbody.querySelectorAll("tr[data-idx]");
+    if (rows.length) rows[rows.length - 1].scrollIntoView({ behavior: "smooth", block: "center" });
   });
+
+  // Nawigacja prev/next fragment (▲/▼)
+  const scrollToRelative = (delta) => {
+    const rows = [...els.tbody.querySelectorAll("tr[data-idx]")];
+    if (!rows.length) return;
+    const wrapper = document.querySelector(".fragment-list-wrapper");
+    const wrapRect = wrapper.getBoundingClientRect();
+    // find the first row whose center is at or below the middle of the viewport
+    let curIdx = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i].getBoundingClientRect();
+      const center = r.top + r.height / 2;
+      if (center >= wrapRect.top + wrapRect.height / 2) { curIdx = i; break; }
+      curIdx = i;
+    }
+    const next = rows[Math.max(0, Math.min(rows.length - 1, curIdx + delta))];
+    if (next) next.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
+  if (els.btnPrev) els.btnPrev.addEventListener("click", () => scrollToRelative(-1));
+  if (els.btnNext) els.btnNext.addEventListener("click", () => scrollToRelative(1));
 
   els.btnOpenFolder.addEventListener("click", async () => {
     const folder = `${state.workdir || els.workdir.value}\\${state.subdir || els.subdir.value}`;
@@ -1423,6 +1453,20 @@ function attachEvents() {
       } else {
         state.collapsedChapters.add(ci);
       }
+      renderFragments();
+      return;
+    }
+
+    if (action === "toggle-chapter-select") {
+      const ci = Number(target.dataset.chapter);
+      const indices = state.fragments
+        .map((f, i) => ({ f, i }))
+        .filter(({ f }) => f.chapterIdx === ci)
+        .map(({ i }) => i);
+      const allSel = indices.every(i => state.fragments[i].selected);
+      indices.forEach(i => { state.fragments[i].selected = !allSel; });
+      // fix indeterminate state
+      target.indeterminate = false;
       renderFragments();
       return;
     }

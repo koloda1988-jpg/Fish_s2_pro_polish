@@ -311,6 +311,9 @@ select:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .list-toolbar-left,
@@ -1367,19 +1370,35 @@ textarea {
   user-select: none;
 }
 .chapter-header-row:hover { background: #1e2840; }
+/* <td> stays display:table-cell, flex layout goes inside the wrapper div */
 .chapter-header-cell {
-  padding: 8px 12px !important;
+  padding: 0 !important;
+  width: 100%;
+}
+.chapter-header-inner {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 8px 12px;
   font-size: 13px;
   color: #c8d0e0;
+  width: 100%;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+.chapter-chk {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: #8aa9ff;
 }
 .chapter-arrow {
   font-size: 11px;
   color: #8aa9ff;
   width: 14px;
   flex-shrink: 0;
+  cursor: pointer;
 }
 .chapter-subtitle { font-weight: 400; color: #8a8f99; }
 .chapter-count { font-size: 11px; }
