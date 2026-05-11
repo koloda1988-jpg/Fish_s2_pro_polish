@@ -44,7 +44,7 @@ const els = {
   chkTags: document.getElementById("chk-tags"),
   chkDebugTts: document.getElementById("chk-debug-tts"),
   btnPickBook: document.getElementById("btn-pick-book"),
-  btnPickWorkdir: document.getElementById("btn-pick-workdir"),
+  btnPickWorkdir: document.getElementById("btn-default-workdir"),
   btnLoadSplit: document.getElementById("btn-load-split"),
   btnSelectAll: document.getElementById("btn-select-all"),
   btnDeselectAll: document.getElementById("btn-deselect-all"),
@@ -1127,12 +1127,12 @@ function attachEvents() {
   }
   // ─────────────────────────────────────────────────────────────────────────
 
-  els.btnPickWorkdir.addEventListener("click", async () => {
-    const dir = await window.api.openDirectory();
-    if (!dir) return;
-    state.workdir = dir;
-    els.workdir.value = dir;
-  });
+  if (els.btnPickWorkdir) {
+    els.btnPickWorkdir.addEventListener("click", async () => {
+      const folder = state.workdir || els.workdir.value.trim();
+      if (folder) await window.api.openInExplorer(folder);
+    });
+  }
 
   els.workdir.addEventListener("input", () => {
     state.workdir = els.workdir.value.trim();
