@@ -140,6 +140,15 @@ const els = {
   voiceSamplesPreview: document.getElementById("voice-samples-preview"),
   voiceList: document.getElementById("voice-list"),
   voiceListHint: document.getElementById("voice-list-hint"),
+  // Voice player / trimmer
+  voiceSourcePlayer: document.getElementById("voice-source-player"),
+  voiceStartSec:     document.getElementById("voice-start-sec"),
+  voiceStartInput:   document.getElementById("voice-start-input"),
+  voiceClipEnd:      document.getElementById("voice-clip-end"),
+  voiceSourceDuration: document.getElementById("voice-source-duration"),
+  btnVoiceSetStart:  document.getElementById("btn-voice-set-start"),
+  voiceYoutubeUrl:   document.getElementById("voice-youtube-url"),
+  btnVoiceDownload:  document.getElementById("btn-voice-download"),
   // Multi-voice speaker map
   speakerVoiceMap: document.getElementById("speaker-voice-map"),
   speakerVoiceMapUI: document.getElementById("speaker-voice-map-ui"),
@@ -499,7 +508,30 @@ function setVoiceSource(path) {
   if (els.voiceName && !els.voiceName.value.trim()) {
     els.voiceName.value = name.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9_ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/g, "_");
   }
+  // Load into audio player
+  if (els.voiceSourcePlayer) {
+    els.voiceSourcePlayer.src = toFileUrl(path);
+    els.voiceSourcePlayer.load();
+    const onMeta = () => {
+      const dur = els.voiceSourcePlayer.duration || 0;
+      if (els.voiceStartSec) {
+        els.voiceStartSec.max = Math.max(0, dur - 1).toFixed(1);
+        els.voiceStartSec.value = 0;
+      }
+      if (els.voiceStartInput) els.voiceStartInput.value = "0";
+      if (els.voiceSourceDuration) els.voiceSourceDuration.textContent = `plik: ${dur.toFixed(1)}s`;
+      updateVoiceStartLabels();
+      els.voiceSourcePlayer.removeEventListener("loadedmetadata", onMeta);
+    };
+    els.voiceSourcePlayer.addEventListener("loadedmetadata", onMeta);
+  }
   if (els.voiceSplitBtn) els.voiceSplitBtn.disabled = false;
+}
+
+function updateVoiceStartLabels() {
+  const start = parseFloat(els.voiceStartSec?.value || 0);
+  const dur = parseInt(els.voiceSegDur?.value || 10, 10);
+  if (els.voiceClipEnd) els.voiceClipEnd.textContent = `koniec: ${(start + dur).toFixed(1)}s`;
 }
 
 async function splitVoice() {
@@ -507,24 +539,35 @@ async function splitVoice() {
   if (!name) { toast("Podaj nazwę lektora.", "error"); return; }
   if (!voiceSourcePath) { toast("Wybierz plik audio.", "error"); return; }
 
+  const startSec = parseFloat(els.voiceStartSec?.value || 0);
+  const durationSec = parseInt(els.voiceSegDur?.value || 10, 10);
+  const lectors = voicesDir();
+  const tempDir = lectors + "\\Temp";
+
   els.voiceSplitBtn.disabled = true;
   els.voiceLog.innerHTML = "";
   els.voiceLog.style.display = "flex";
-  els.voiceSamplesPreview.style.display = "none";
-  voiceLogAppend(`▶ Dzielę: ${voiceSourcePath}`);
-  voiceLogAppend(`  Lektor: ${name}  |  Długość próbki: ${els.voiceSegDur.value}s`);
+  if (els.voiceSamplesPreview) els.voiceSamplesPreview.style.display = "none";
+  voiceLogAppend(`▶ Źródło: ${voiceSourcePath}`);
+  voiceLogAppend(`  Lektor: ${name}  |  Start: ${startSec.toFixed(1)}s  |  Długość: ${durationSec}s`);
 
   try {
-    const result = await window.api.py("split_audio", {
-      path: voiceSourcePath,
-      duration_sec: parseInt(els.voiceSegDur.value, 10),
-      voice_name: name,
-      voices_dir: voicesDir(),
+    const result = await window.api.py("create_voice_sample", {
+      source_path:  voiceSourcePath,
+      start_sec:    startSec,
+      duration_sec: durationSec,
+      voice_name:   name,
+      lectors_dir:  lectors,
+      temp_dir:     tempDir,
     });
-    voiceLogAppend(`✅ Gotowe! Zapisano ${result.count} próbek w: ${result.out_dir}`);
-    renderVoiceSamplesPreview(result.samples);
+    if (result.ok === false) throw new Error(result.error || "Błąd backendu");
+    voiceLogAppend(`✅ WAV: ${result.wav_path}`);
+    voiceLogAppend(`✅ TXT: ${result.txt_path}`);
+    if (result.text) voiceLogAppend(`🎙 Transkrypcja: ${result.text.slice(0, 120)}…`);
+    const samples = [result.temp_clip, result.wav_path].filter(Boolean);
+    renderVoiceSamplesPreview(samples);
     await refreshVoiceList();
-    toast(`Lektor "${name}" — ${result.count} próbek.`, "success");
+    toast(`Lektor "${name}" zapisany.`, "success");
   } catch (err) {
     voiceLogAppend(`❌ Błąd: ${err.message}`);
     toast(`Błąd: ${err.message}`, "error");
@@ -616,10 +659,12 @@ async function renameVoicePrompt(name) {
 }
 
 async function activateVoice(name, firstSample) {
-  // Ustaw ref_audio na pierwszą próbkę danego lektora
-  if (els.serverRefAudio && firstSample) {
-    els.serverRefAudio.value = firstSample;
-  }
+  // Ustaw ref_audio i ref_text na pliki danego lektora
+  const lectors = voicesDir();
+  const wavPath = firstSample || (lectors + "\\" + name + ".wav");
+  const txtPath = lectors + "\\" + name + ".txt";
+  if (els.serverRefAudio) els.serverRefAudio.value = wavPath;
+  if (els.serverRefText)  els.serverRefText.value  = txtPath;
   toast(`Lektor "${name}" ustawiony jako aktywny.`, "success");
   renderVoiceList(await (async () => {
     try { const r = await window.api.py("list_voices", { voices_dir: voicesDir() }); return r.voices || []; } catch (_) { return []; }
@@ -1173,6 +1218,69 @@ function attachEvents() {
   if (els.voiceSegDur) {
     els.voiceSegDur.addEventListener("input", () => {
       if (els.voiceSegVal) els.voiceSegVal.textContent = els.voiceSegDur.value;
+      updateVoiceStartLabels();
+    });
+  }
+
+  // voice-set-seg preset buttons (10s / 30s / 60s)
+  document.querySelectorAll("[data-action='voice-set-seg']").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const seg = btn.dataset.seg;
+      if (els.voiceSegDur) { els.voiceSegDur.value = seg; }
+      if (els.voiceSegVal) els.voiceSegVal.textContent = seg;
+      updateVoiceStartLabels();
+    });
+  });
+
+  // Start slider ↔ number input sync
+  if (els.voiceStartSec) {
+    els.voiceStartSec.addEventListener("input", () => {
+      if (els.voiceStartInput) els.voiceStartInput.value = parseFloat(els.voiceStartSec.value).toFixed(1);
+      updateVoiceStartLabels();
+    });
+  }
+  if (els.voiceStartInput) {
+    els.voiceStartInput.addEventListener("input", () => {
+      const v = parseFloat(els.voiceStartInput.value) || 0;
+      if (els.voiceStartSec) els.voiceStartSec.value = v;
+      updateVoiceStartLabels();
+    });
+  }
+
+  // "Ustaw start z odtwarzacza" button
+  if (els.btnVoiceSetStart) {
+    els.btnVoiceSetStart.addEventListener("click", () => {
+      const t = els.voiceSourcePlayer?.currentTime || 0;
+      if (els.voiceStartSec) els.voiceStartSec.value = t;
+      if (els.voiceStartInput) els.voiceStartInput.value = t.toFixed(1);
+      updateVoiceStartLabels();
+    });
+  }
+
+  // YouTube download
+  if (els.btnVoiceDownload) {
+    els.btnVoiceDownload.addEventListener("click", async () => {
+      const url = (els.voiceYoutubeUrl?.value || "").trim();
+      if (!url) { toast("Wklej link YouTube.", "error"); return; }
+      els.btnVoiceDownload.disabled = true;
+      els.voiceLog.innerHTML = "";
+      els.voiceLog.style.display = "flex";
+      voiceLogAppend(`⏬ Pobieranie: ${url}`);
+      try {
+        const result = await window.api.py("download_youtube_audio", {
+          url,
+          voices_dir: voicesDir(),
+        });
+        if (result.ok === false) throw new Error(result.error || "Błąd pobierania");
+        voiceLogAppend(`✅ Pobrano: ${result.audio_path}`);
+        setVoiceSource(result.audio_path);
+        toast(`Pobrano: ${result.title}`, "success");
+      } catch (err) {
+        voiceLogAppend(`❌ ${err.message}`);
+        toast(`Błąd: ${err.message}`, "error");
+      } finally {
+        els.btnVoiceDownload.disabled = false;
+      }
     });
   }
 
