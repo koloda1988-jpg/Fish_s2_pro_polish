@@ -140,6 +140,15 @@ const els = {
   // Multi-voice speaker map
   speakerVoiceMap: document.getElementById("speaker-voice-map"),
   speakerVoiceMapUI: document.getElementById("speaker-voice-map-ui"),
+  // Toolbar extras
+  btnDeselectDone: document.getElementById("btn-deselect-done"),
+  btnPickSubdir: document.getElementById("btn-pick-subdir"),
+  btnGotoFrag: document.getElementById("btn-goto-frag"),
+  gotoFragInput: document.getElementById("goto-frag-input"),
+  mainDropzone: document.getElementById("main-dropzone"),
+  mainFileInput: document.getElementById("main-file-input"),
+  mainDropzoneLabel: document.getElementById("main-dropzone-label"),
+  btnSaveTtsSettings: document.getElementById("btn-save-tts-settings"),
 };
 
 let editingIdx = null;
@@ -258,7 +267,7 @@ function renderFragments() {
   if (data.length === 0) {
     els.tbody.innerHTML = `
       <tr class="empty-state">
-        <td colspan="8">
+        <td colspan="9">
           <div class="empty-state-content">
             <p>Brak fragmentow. Wczytaj ksiazke i uruchom podzial.</p>
           </div>
@@ -294,6 +303,7 @@ function renderFragments() {
           <td class="col-dur">${dur}</td>
           <td class="col-chars ${charCls}" title="${charCount} znaków">${charCount > 700 ? "⚠ " : ""}${charCount}</td>
           ${renderTagsCell(f.text)}
+          <td class="col-speaker">${escapeHtml(resolveVoiceForFragment(f).label || "Maciej")}</td>
           <td class="col-text" data-action="edit" data-idx="${i}" title="Kliknij, aby edytowac">${renderTextWithBoldTags(f.text)}</td>
         </tr>
       `;
@@ -414,7 +424,7 @@ function setPrepareInputFile(path) {
 let voiceSourcePath = "";
 
 function voicesDir() {
-  return `${state.workdir}\\voices`;
+  return `${state.workdir}\\Lectors`;
 }
 
 function openVoiceModal() {
@@ -1229,6 +1239,19 @@ function attachEvents() {
     updateFragLabel(true);
   }
 
+  // ─── TTS Server section toggle ─────────────────────────────────────────
+  const ttsServerToggle = document.getElementById("tts-server-toggle");
+  const ttsServerBody = document.getElementById("tts-server-body");
+  let ttsServerExpanded = false;
+  if (ttsServerToggle && ttsServerBody) {
+    ttsServerToggle.addEventListener("click", () => {
+      ttsServerExpanded = !ttsServerExpanded;
+      ttsServerBody.style.display = ttsServerExpanded ? "block" : "none";
+      const arrow = ttsServerExpanded ? "▼" : "▶";
+      ttsServerToggle.childNodes[0].textContent = arrow + " Tryb TTS";
+    });
+  }
+
   // ─── Advanced TTS sliders ───────────────────────────────────────────────
   const ttsToggle = document.getElementById("tts-advanced-toggle");
   const ttsBody = document.getElementById("tts-advanced-body");
@@ -1258,6 +1281,66 @@ function attachEvents() {
   if (els.btnSelectN) els.btnSelectN.addEventListener("click", selectNPending);
   if (els.selectNInput) els.selectNInput.addEventListener("keydown", (e) => { if (e.key === "Enter") selectNPending(); });
   els.btnMergeAll.addEventListener("click", () => mergeSelection(false));
+
+  // Odznacz gotowe
+  if (els.btnDeselectDone) {
+    els.btnDeselectDone.addEventListener("click", () => {
+      state.fragments.forEach((f) => { if (f.status === "success") f.selected = false; });
+      renderFragments();
+    });
+  }
+
+  // Wybierz podkatalog książki
+  if (els.btnPickSubdir) {
+    els.btnPickSubdir.addEventListener("click", async () => {
+      const dir = await window.api.openDirectory();
+      if (!dir) return;
+      const name = dir.split(/[\\/]/).pop();
+      // Dodaj opcję jeśli nie istnieje
+      let opt = Array.from(els.subdir.options).find(o => o.value === name);
+      if (!opt) {
+        opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        els.subdir.appendChild(opt);
+      }
+      els.subdir.value = name;
+      state.subdir = name;
+      toast(`Wybrano książkę: ${name}`, "success");
+    });
+  }
+
+  // Skocz do fragmentu
+  if (els.btnGotoFrag && els.gotoFragInput) {
+    const gotoFrag = () => {
+      const n = parseInt(els.gotoFragInput.value, 10);
+      if (!n || n < 1) return;
+      const row = els.tbody.querySelector(`tr[data-idx="${n - 1}"]`);
+      if (row) row.scrollIntoView({ behavior: "smooth", block: "center" });
+      else toast(`Fragment #${n} nie istnieje.`, "error");
+    };
+    els.btnGotoFrag.addEventListener("click", gotoFrag);
+    els.gotoFragInput.addEventListener("keydown", (e) => { if (e.key === "Enter") gotoFrag(); });
+  }
+
+  // Main dropzone — przeciągnij plik TXT/EPUB/PDF
+  if (els.mainDropzone) {
+    els.mainDropzone.addEventListener("click", () => els.mainFileInput?.click());
+    els.mainDropzone.addEventListener("dragover", (e) => { e.preventDefault(); els.mainDropzone.classList.add("drag-over"); });
+    els.mainDropzone.addEventListener("dragleave", () => els.mainDropzone.classList.remove("drag-over"));
+    els.mainDropzone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      els.mainDropzone.classList.remove("drag-over");
+      const file = e.dataTransfer?.files?.[0];
+      if (file?.path) pickBookFromPath(file.path);
+    });
+  }
+  if (els.mainFileInput) {
+    els.mainFileInput.addEventListener("change", () => {
+      const file = els.mainFileInput.files?.[0];
+      if (file?.path) pickBookFromPath(file.path);
+    });
+  }
 
   els.btnFirst.addEventListener("click", () => {
     if (els.tbody.firstElementChild) {
