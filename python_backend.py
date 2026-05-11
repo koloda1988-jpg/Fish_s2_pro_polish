@@ -1148,7 +1148,7 @@ def handle(method, params):
             "ref_audio_bytes": ref_audio_bytes,
             "ref_audio_name":  ref_audio_name,
             "ref_text":  ref_text,
-            "fragments": [(int(t["idx"]), t["text"]) for t in params["fragments"]],
+            "fragments": [(int(t["idx"]), t["text"], None) for t in params["fragments"]],
             "phonetic_map": params.get("phonetic_map") or None,
             "gpu_workers": int(params.get("gpu_workers", 1)),
             "timeout":   int(params.get("timeout", 1800)),
@@ -1251,6 +1251,15 @@ def handle(method, params):
             else:
                 results.append({"idx": i, "path": full, "exists": False, "ext": "wav"})
         return {"results": results, "scanned": count}
+    if method == "list_subdirs":
+        base = params.get("path", "")
+        if not base or not os.path.isdir(base):
+            return {"dirs": []}
+        dirs = sorted(
+            d for d in os.listdir(base)
+            if os.path.isdir(os.path.join(base, d)) and not d.startswith(".")
+        )
+        return {"dirs": dirs}
     if method == "list_voices":
         voices_dir = params.get("voices_dir", "")
         voices = []

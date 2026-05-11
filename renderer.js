@@ -1,6 +1,6 @@
 const state = {
   bookPath: "",
-  workdir: "K:\\FishS2PRo\\s2.cpp\\build\\bin\\Release",
+  workdir: document.getElementById("workdir")?.value.trim() || "C:\\Users\\kolod\\Documents\\Claude\\Projects\\Audiobook\\Audiobook (1)\\wersja 2",
   subdir: "Silos",
   chapters: [],
   fragments: [],
@@ -53,7 +53,6 @@ const els = {
   btnStop: document.getElementById("btn-stop"),
   btnMergeSelected: document.getElementById("btn-merge-selected"),
   btnMergeAll: document.getElementById("btn-merge-all"),
-  btnSplitSelected: document.getElementById("btn-split-selected"),
   btnSelectN: document.getElementById("btn-select-n"),
   selectNInput: document.getElementById("select-n-input"),
     btnFirst: document.getElementById("btn-first"),
@@ -592,18 +591,29 @@ function renderVoiceSamplesPreview(samples) {
   }).join("");
 }
 
-function playVoiceSample(path) {
+function playVoiceSample(path, playBtn) {
   if (!path) return;
   if (!els.audioPlayer) return;
-  // If already playing this file — pause/stop
   const url = toFileUrl(path);
+  // Toggle: jeśli ten sam plik gra → zatrzymaj
   if (els.audioPlayer.src === url && !els.audioPlayer.paused) {
     els.audioPlayer.pause();
     els.audioPlayer.currentTime = 0;
+    // Przywróć wszystkie przyciski play
+    els.voiceList?.querySelectorAll(".voice-play-btn").forEach(b => { b.textContent = "▶ Play"; });
     return;
   }
+  // Zatrzymaj poprzedni
+  els.audioPlayer.pause();
+  els.audioPlayer.currentTime = 0;
+  els.voiceList?.querySelectorAll(".voice-play-btn").forEach(b => { b.textContent = "▶ Play"; });
+  // Zmień kliknięty przycisk na Stop (element przekazany bezpośrednio)
+  if (playBtn) playBtn.textContent = "⏹ Stop";
   els.audioPlayer.src = url;
   els.audioPlayer.play().catch(() => {});
+  els.audioPlayer.addEventListener("ended", () => {
+    if (playBtn) playBtn.textContent = "▶ Play";
+  }, { once: true });
 }
 
 async function refreshVoiceList() {
@@ -631,9 +641,9 @@ function renderVoiceList(voices) {
     const escapedSample = en(v.first_sample || "");
     const transcript = v.transcript ? `<div class="voice-card-transcript">${en(v.transcript.slice(0, 140))}…</div>` : "";
     const playBtn = escapedSample
-      ? `<button class="btn btn-ghost voice-play-btn" title="Odtwórz próbkę" onclick="playVoiceSample('${escapedSample}')">▶</button>`
+      ? `<button class="btn btn-ghost voice-play-btn" title="Odtwórz próbkę" data-action="voice-play" data-sample="${escapedSample}">▶ Play</button>`
       : "";
-    return `<div class="voice-card${isActive ? ' voice-card--active' : ''}">
+    return `<div class="voice-card${isActive ? ' voice-card--active' : ''}" data-voice="${escapedName}" data-sample="${escapedSample}">
       <div class="voice-card-header">
         ${playBtn}
         <div class="voice-card-name">${escapedName}${isActive ? ' <span class="voice-active-badge">AKTYWNY</span>' : ""}</div>
@@ -641,14 +651,14 @@ function renderVoiceList(voices) {
       <div class="voice-card-meta">${v.sample_count || 1} próbek · ${en(v.source || "manual/yt")}</div>
       ${transcript}
       <div class="voice-card-actions">
-        <button class="btn ${isActive ? 'btn-secondary' : 'btn-primary'}" style="font-size:11px;padding:3px 12px;"
-          onclick="activateVoice('${escapedName}', '${escapedSample}')">
+        <button class="btn ${isActive ? 'btn-secondary' : 'btn-primary'}" style="font-size:11px;padding:4px 12px;"
+          data-action="voice-activate" data-voice="${escapedName}" data-sample="${escapedSample}">
           ${isActive ? "✓ Aktywny" : "Ustaw domyślnie"}
         </button>
-        <button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;" title="Zmień nazwę"
-          onclick="renameVoicePrompt('${escapedName}')">✏</button>
-        <button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;color:var(--error);" title="Usuń"
-          onclick="deleteVoice('${escapedName}')">🗑</button>
+        <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;"
+          data-action="voice-rename" data-voice="${escapedName}">Zmień nazwę</button>
+        <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;background:rgba(220,38,38,0.15);border-color:rgba(220,38,38,0.4);color:#ff6b6b;"
+          data-action="voice-delete" data-voice="${escapedName}">Usuń</button>
       </div>
     </div>`;
   }).join("");
@@ -771,6 +781,30 @@ async function pickBookFromPath(path) {
   try {
     const data = await window.api.py("load_book", { path });
     state.chapters = data.chapters || [];
+
+    // === Auto-populacja mapy speaker->voice z wykrytych postaci ===
+    // python_backend zwraca data.speakers (sidecar *.speakers.txt lub
+    // ekstrakcja [speaker:Imie] z tekstu). Dla kazdej nowej postaci, ktora
+    // nie ma jeszcze wpisu w textarea — dorzucamy pusta linie "Imie => ".
+    const detectedSpeakers = Array.isArray(data.speakers) ? data.speakers : [];
+    if (detectedSpeakers.length > 0 && els.speakerVoiceMap) {
+      const currentMap = parseSpeakerVoiceMapText(els.speakerVoiceMap.value || "");
+      const currentKeys = Object.keys(currentMap);
+      const linesToAdd = [];
+      for (const sp of detectedSpeakers) {
+        if (!currentKeys.includes(sp.toLowerCase())) {
+          linesToAdd.push(sp + " => ");
+        }
+      }
+      if (linesToAdd.length > 0) {
+        const sep = (els.speakerVoiceMap.value && !els.speakerVoiceMap.value.endsWith("\n")) ? "\n" : "";
+        els.speakerVoiceMap.value = (els.speakerVoiceMap.value || "") + sep + linesToAdd.join("\n");
+        toast("Wykryto " + detectedSpeakers.length + " postaci w ksiazce — przypisz im lektorow w mapie.", "info");
+      } else {
+        toast("Wykryto " + detectedSpeakers.length + " postaci — wszystkie sa juz w mapie.", "info");
+      }
+    }
+
     if (state.chapters.length === 0) {
       els.chapterSelect.innerHTML = "<option>Brak sekcji</option>";
       toast("Nie znaleziono tresci w pliku.", "error");
@@ -974,8 +1008,8 @@ async function runSelectedServer(selectedIdx, wd, subdir) {
         max_new_tokens: maxTokens,
         output_format: "mp3",
       });
-      if (res && res.error) {
-        toast("Pipeline blad: " + res.error, "error");
+      if (res && (res.error || res.ok === false)) {
+        toast("Pipeline blad: " + (res.error || res.reason || "nieznany blad"), "error");
       }
     } catch (e) {
       toast("Pipeline wyjatek: " + e.message, "error");
@@ -1002,7 +1036,6 @@ async function runSelected() {
     const ok = confirm(
       `⚠ Uwaga: ${tooLong.length} zaznaczony fragment(y) jest zbyt długi dla Fish Speech:\n\n${lines}\n\n` +
       `Fragment >600 znaków może generować się kilka godzin zamiast kilku minut.\n` +
-      `Zalecane: użyj "✂ Podziel zaznaczone" przed generacją.\n\n` +
       `Czy mimo to kontynuować?`
     );
     if (!ok) return;
@@ -1081,6 +1114,34 @@ async function runSelected() {
   updateButtonsState();
   updateProgress();
   toast("Przetwarzanie zakonczone.", "success");
+  // Auto-merge: sprawdź czy kt\u00f3ry\u015b rozdzia\u0142 jest w ca\u0142o\u015bci gotowy
+  checkAutoMergeChapters();
+}
+
+async function checkAutoMergeChapters() {
+  // Znajdź wszystkie unikalne chapterIdx
+  const chapters = [...new Set(state.fragments.map(f => f.chapterIdx).filter(x => x !== undefined))];
+  for (const chIdx of chapters) {
+    const chFrags = state.fragments.filter(f => f.chapterIdx === chIdx);
+    if (!chFrags.length) continue;
+    if (!chFrags.every(f => f.status === "success" && f.wavPath)) continue;
+    const paths = chFrags.map(f => f.wavPath);
+    const bookName = (state.subdir || "audiobook").replace(/[^a-zA-Z0-9_ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/g, "_");
+    const outName = `Rozdzial${chIdx + 1}_${bookName}.mp3`;
+    const outPath = `${state.workdir}\\Audiobooks\\${state.subdir}\\${outName}`;
+    // Sprawdź czy plik już istnieje (avoid double merge)
+    try {
+      const ex = await window.api.py("exists", { path: outPath });
+      if (ex.exists) continue;
+    } catch (_) {}
+    toast(`Scalanie rozdziału ${chIdx + 1} (${chFrags.length} plików)…`, "info");
+    try {
+      await window.api.py("merge_wavs", { paths, out_path: outPath });
+      toast(`✅ Rozdział ${chIdx + 1} scalony → ${outName}`, "success");
+    } catch (err) {
+      toast(`Błąd scalania rozdziału ${chIdx + 1}: ${err.message}`, "error");
+    }
+  }
 }
 
 function stopRun() {
@@ -1302,7 +1363,7 @@ function attachEvents() {
       const action = btn.dataset.action;
       const name   = btn.dataset.voice || btn.closest("[data-voice]")?.dataset.voice || "";
       const sample = btn.dataset.sample || btn.closest("[data-sample]")?.dataset.sample || "";
-      if (action === "voice-play")     { playVoiceSample(sample); return; }
+      if (action === "voice-play")     { playVoiceSample(sample, el); return; }
       if (action === "voice-activate") { await activateVoice(name, sample); return; }
       if (action === "voice-rename")   { await renameVoicePrompt(name); return; }
       if (action === "voice-delete")   { await deleteVoice(name); return; }
@@ -1470,7 +1531,6 @@ function attachEvents() {
     });
   }
   els.btnMergeSelected.addEventListener("click", () => mergeSelection(true));
-  if (els.btnSplitSelected) els.btnSplitSelected.addEventListener("click", splitSelected);
   if (els.btnSelectN) els.btnSelectN.addEventListener("click", selectNPending);
   if (els.selectNInput) els.selectNInput.addEventListener("keydown", (e) => { if (e.key === "Enter") selectNPending(); });
   els.btnMergeAll.addEventListener("click", () => mergeSelection(false));
@@ -1483,12 +1543,17 @@ function attachEvents() {
     });
   }
 
-  // Wybierz podkatalog książki
+  // Wybierz podkatalog książki — skanuj Audiobooks/ obok workdir
   if (els.btnPickSubdir) {
     els.btnPickSubdir.addEventListener("click", async () => {
-      const dir = await window.api.openDirectory();
+      const wd = state.workdir || els.workdir.value.trim();
+      const audiobooksDir = wd + "\\Audiobooks";
+      // Spróbuj otworzyć dialog startując od Audiobooks/
+      const dir = await window.api.openDirectory({ defaultPath: audiobooksDir });
       if (!dir) return;
       const name = dir.split(/[\\/]/).pop();
+      // Ustaw workdir na katalog nadrzędny (Audiobooks/)
+      const parentDir = dir.substring(0, dir.length - name.length - 1);
       // Dodaj opcję jeśli nie istnieje
       let opt = Array.from(els.subdir.options).find(o => o.value === name);
       if (!opt) {
@@ -1499,6 +1564,14 @@ function attachEvents() {
       }
       els.subdir.value = name;
       state.subdir = name;
+      // Jeśli wybrany folder jest w Audiobooks, zaktualizuj workdir na rodzica
+      if (parentDir && parentDir.toLowerCase().endsWith("audiobooks")) {
+        const grandParent = parentDir.substring(0, parentDir.length - "audiobooks".length - 1);
+        if (grandParent) {
+          state.workdir = grandParent;
+          els.workdir.value = grandParent;
+        }
+      }
       toast(`Wybrano książkę: ${name}`, "success");
     });
   }
@@ -1758,8 +1831,11 @@ function attachBackendEvents() {
       const idx = Number(msg.idx) - 1;
       if (idx >= 0 && idx < state.fragments.length) {
         state.fragments[idx].status = msg.status || state.fragments[idx].status;
-        if (msg.wav_path) state.fragments[idx].wavPath = msg.wav_path;
+        // backend wysyła "wav" lub "wav_path"
+        const wavPath = msg.wav_path || msg.wav;
+        if (wavPath) state.fragments[idx].wavPath = wavPath;
         if (msg.audio_seconds) state.fragments[idx].audioSeconds = Number(msg.audio_seconds);
+        if (msg.duration) state.fragments[idx].audioSeconds = Number(msg.duration);
         renderFragments();
       }
       return;
@@ -1790,7 +1866,7 @@ async function bootstrap() {
   buildSpeakerVoiceMapUI();
   attachSpeakerVoiceMapEvents();
 
-  state.workdir = els.workdir.value.trim();
+  state.workdir = els.workdir.value.trim() || state.workdir;
   state.subdir = els.subdir.value.trim() || "Silos";
   state.phoneticEnabled = Boolean(els.chkPhonetic.checked);
   state.tagsEnabled = Boolean(els.chkTags.checked);
@@ -1805,6 +1881,9 @@ async function bootstrap() {
     toast(`Backend nie odpowiada: ${err.message}`, "error");
   }
 
+  // Skanuj podfoldery Audiobooks/ i wypełnij listę książek
+  await scanAudiobooksSubdirs();
+
   // Załaduj dostępne głosy
   await loadAvailableVoices();
 }
@@ -1813,6 +1892,32 @@ async function bootstrap() {
 
 const DEFAULT_SPEAKER_VOICE_MAP = `Narrator=Maciej`;
 let state_availableVoices = [];
+
+async function scanAudiobooksSubdirs() {
+  // Pobierz listę podfolderów Audiobooks/ przez backend
+  const wd = state.workdir;
+  const audiobooksDir = wd + "\\Audiobooks";
+  try {
+    const res = await window.api.py("list_subdirs", { path: audiobooksDir });
+    const dirs = res?.dirs || res?.subdirs || [];
+    if (dirs.length === 0) return;
+    // Wyczyść listę i dodaj znalezione foldery
+    els.subdir.innerHTML = "";
+    dirs.forEach(name => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      els.subdir.appendChild(opt);
+    });
+    // Wybierz pierwszą lub zachowaj bieżącą wartość
+    const current = state.subdir;
+    const match = dirs.find(d => d === current);
+    els.subdir.value = match || dirs[0];
+    state.subdir = els.subdir.value;
+  } catch (_) {
+    // Backend nie obsługuje list_subdirs — brak zmian, użytkownik może kliknąć Wybierz
+  }
+}
 
 async function loadAvailableVoices() {
   try {
