@@ -918,6 +918,8 @@ input[type="checkbox"] {
   width: min(1140px, 96vw);
   max-width: 1140px;
   max-height: 88vh;
+  display: flex;
+  flex-direction: column;
 }
 
 .voice-modal-body {
@@ -925,7 +927,9 @@ input[type="checkbox"] {
   grid-template-columns: minmax(0, 1.75fr) minmax(280px, 1fr);
   gap: 18px;
   padding: 16px 18px 18px;
-  overflow: auto;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
 }
 
 .voice-col-left {
@@ -933,6 +937,8 @@ input[type="checkbox"] {
   flex-direction: column;
   gap: 12px;
   min-width: 0;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .voice-col-right {
@@ -940,7 +946,7 @@ input[type="checkbox"] {
   flex-direction: column;
   gap: 8px;
   min-width: 280px;
-  max-height: 100%;
+  overflow: hidden;
 }
 
 .voice-controls-grid {
@@ -1023,8 +1029,7 @@ input[type="checkbox"] {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-height: 160px;
-  max-height: 420px;
+  min-height: 0;
 }
 
 #main-dropzone {

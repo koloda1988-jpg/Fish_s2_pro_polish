@@ -593,8 +593,16 @@ function renderVoiceSamplesPreview(samples) {
 }
 
 function playVoiceSample(path) {
+  if (!path) return;
   if (!els.audioPlayer) return;
-  els.audioPlayer.src = toFileUrl(path);
+  // If already playing this file — pause/stop
+  const url = toFileUrl(path);
+  if (els.audioPlayer.src === url && !els.audioPlayer.paused) {
+    els.audioPlayer.pause();
+    els.audioPlayer.currentTime = 0;
+    return;
+  }
+  els.audioPlayer.src = url;
   els.audioPlayer.play().catch(() => {});
 }
 
@@ -1285,6 +1293,21 @@ function attachEvents() {
   }
 
   if (els.voiceSplitBtn) els.voiceSplitBtn.addEventListener("click", splitVoice);
+
+  // Delegacja zdarzeń dla przycisków na kartach lektorów (CSP blokuje onclick=)
+  if (els.voiceList) {
+    els.voiceList.addEventListener("click", async (e) => {
+      const btn = e.target.closest("[data-action]");
+      if (!btn) return;
+      const action = btn.dataset.action;
+      const name   = btn.dataset.voice || btn.closest("[data-voice]")?.dataset.voice || "";
+      const sample = btn.dataset.sample || btn.closest("[data-sample]")?.dataset.sample || "";
+      if (action === "voice-play")     { playVoiceSample(sample); return; }
+      if (action === "voice-activate") { await activateVoice(name, sample); return; }
+      if (action === "voice-rename")   { await renameVoicePrompt(name); return; }
+      if (action === "voice-delete")   { await deleteVoice(name); return; }
+    });
+  }
 
   // Drag & drop
   if (els.voiceDropzone) {
