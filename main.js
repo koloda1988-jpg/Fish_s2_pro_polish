@@ -8,7 +8,7 @@
 // 5) Otwiera main window z renderer.html
 // 6) Przy zamykaniu — kill obu podprocesów (tree-kill cascade)
 
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, screen } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -349,11 +349,15 @@ function pyCall(method, params = {}) {
 // ─── Main window ────────────────────────────────────────────────────────────
 
 function createMainWindow() {
+  const { height: screenH } = screen.getPrimaryDisplay().workAreaSize;
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 860,
-    minWidth: 1024,
-    minHeight: 700,
+    width: 1360,
+    height: screenH,
+    minWidth: 1360,
+    minHeight: screenH,
+    maxWidth: 1360,
+    maxHeight: screenH,
+    resizable: false,
     backgroundColor: '#0f0f12',
     title: 'Audiobook Generator',
     show: false,
@@ -365,6 +369,17 @@ function createMainWindow() {
     },
   });
   mainWindow.removeMenu();
+
+  // Skroty F5 i Ctrl+R do reload UI (bez restartu serwera)
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown') {
+      if (input.key === 'F5' || (input.control && input.key.toLowerCase() === 'r')) {
+        event.preventDefault();
+        mainWindow.webContents.reload();
+      }
+    }
+  });
+
   mainWindow.loadFile('renderer.html');
   mainWindow.webContents.openDevTools({ mode: 'detach' });
   mainWindow.once('ready-to-show', () => {
@@ -422,13 +437,15 @@ async function callGeminiPrepare({ apiKey, prompt, chapters, model }) {
 // ─── IPC handlers ───────────────────────────────────────────────────────────
 
 ipcMain.handle('dialog:openFile', async (_evt, opts) => {
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const dialogOpts = {
     properties: ['openFile'],
     filters: opts?.filters || [
       { name: 'Książki', extensions: ['epub', 'pdf', 'txt'] },
       { name: 'Wszystkie', extensions: ['*'] },
     ],
-  });
+  };
+  if (opts?.defaultPath) dialogOpts.defaultPath = opts.defaultPath;
+  const result = await dialog.showOpenDialog(mainWindow, dialogOpts);
   return result.canceled ? null : result.filePaths[0];
 });
 
@@ -454,6 +471,13 @@ ipcMain.handle('config:getDefaultWorkdir', async () => {
   return PROJECT_DIR;
 });
 ipcMain.handle('shell:openFolder', async (_evt, p) => shell.openPath(p));
+
+ipcMain.handle('window:reload', async () => {
+  // Tylko reload renderera — serwer TTS i python_backend zostaja zywe.
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.reload();
+  }
+});
 ipcMain.handle('py:call', async (_evt, method, params) => pyCall(method, params));
 
 ipcMain.handle('gemini:prepareBook', async (_evt, payload) => {

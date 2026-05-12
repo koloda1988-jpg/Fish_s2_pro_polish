@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld('api', {
   openInExplorer: (p) => ipcRenderer.invoke('shell:openFolder', p),
   openWavFile: (p) => ipcRenderer.invoke('shell:openFile', p),
 
+  // reload renderera (bez restartu serwera TTS)
+  reloadApp: () => ipcRenderer.invoke('window:reload'),
+
   // python backend (JSON-RPC over stdin/stdout)
   py: (method, params) => ipcRenderer.invoke('py:call', method, params),
 

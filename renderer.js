@@ -1,7 +1,10 @@
 const state = {
   bookPath: "",
+  bookName: "",
   workdir: document.getElementById("workdir")?.value.trim() || "C:\\Users\\kolod\\Documents\\Claude\\Projects\\Audiobook\\Audiobook (1)\\wersja 2",
   subdir: "Silos",
+  audiobooksRoot: "",    // nadpisuje workdir\\Audiobooks gdy ustawione
+  filesbooksRoot: "",    // nadpisuje workdir\\Files_books gdy ustawione
   chapters: [],
   fragments: [],
   running: false,
@@ -14,6 +17,10 @@ const state = {
   debugTtsInput: false,
   collapsedChapters: new Set(),
 };
+
+// Pomocnicze ścieżki — respektują overrides z modalu ustawień
+function abRoot() { return state.audiobooksRoot || `${state.workdir}\\Audiobooks`; }
+function fbRoot() { return state.filesbooksRoot || `${state.workdir}\\Files_books`; }
 
 const DEFAULT_PREP_PROMPT = `Rola: Jesteś profesjonalnym reżyserem audiobooków i specjalistą od fonetyki modelu Fish Speech S2 Pro. Twoim zadaniem jest przygotowanie tekstu książki do syntezy mowy.
 
@@ -124,6 +131,7 @@ const els = {
   errorClose: document.getElementById("error-close"),
   errorOk: document.getElementById("error-ok"),
   // Voice Creation
+  btnReloadApp: document.getElementById("btn-reload-app"),
   btnVoiceCreation: document.getElementById("btn-voice-creation"),
   voiceModal: document.getElementById("voice-modal"),
   voiceClose: document.getElementById("voice-close"),
@@ -160,6 +168,22 @@ const els = {
   mainFileInput: document.getElementById("main-file-input"),
   mainDropzoneLabel: document.getElementById("main-dropzone-label"),
   btnSaveTtsSettings: document.getElementById("btn-save-tts-settings"),
+  // Guziki przy dropdownie książki
+  btnOpenAudiobooks: document.getElementById("btn-open-audiobooks"),
+  btnOpenFilesbooks: document.getElementById("btn-open-filesbooks"),
+  btnBookSettings:   document.getElementById("btn-book-settings"),
+  // Modal ustawień książki
+  bookSettingsModal:    document.getElementById("book-settings-modal"),
+  bsmClose:             document.getElementById("bsm-close"),
+  bsmBookName:          document.getElementById("bsm-book-name"),
+  bsmAudiobooksPath:    document.getElementById("bsm-audiobooks-path"),
+  bsmFilesbooksPath:    document.getElementById("bsm-filesbooks-path"),
+  bsmDescription:       document.getElementById("bsm-description"),
+  bsmNotes:             document.getElementById("bsm-notes"),
+  btnBsmPickAudiobooks: document.getElementById("btn-bsm-pick-audiobooks"),
+  btnBsmPickFilesbooks: document.getElementById("btn-bsm-pick-filesbooks"),
+  btnBsmCancel:         document.getElementById("btn-bsm-cancel"),
+  btnBsmSave:           document.getElementById("btn-bsm-save"),
 };
 
 let editingIdx = null;
@@ -429,6 +453,80 @@ function closeEditModal() {
   els.editModal.hidden = true;
 }
 
+// ─── Modal: Ustawienia książki ─────────────────────────────────────
+function bookMetaKey() { return `book_meta_${state.subdir || "default"}`; }
+
+function loadBookMeta() {
+  try { return JSON.parse(localStorage.getItem(bookMetaKey()) || "{}"); }
+  catch (_) { return {}; }
+}
+
+function saveBookMeta(meta) {
+  localStorage.setItem(bookMetaKey(), JSON.stringify(meta));
+}
+
+function openBookSettingsModal() {
+  if (!els.bookSettingsModal) return;
+  const meta = loadBookMeta();
+  els.bsmBookName.value        = state.subdir || "";
+  els.bsmAudiobooksPath.value  = abRoot();
+  els.bsmFilesbooksPath.value  = fbRoot();
+  els.bsmDescription.value     = meta.description || "";
+  els.bsmNotes.value           = meta.notes || "";
+  els.bookSettingsModal.hidden = false;
+}
+
+function closeBookSettingsModal() {
+  if (els.bookSettingsModal) els.bookSettingsModal.hidden = true;
+}
+
+function saveBookSettings() {
+  const newName     = (els.bsmBookName.value || "").trim();
+  const newAbRoot   = (els.bsmAudiobooksPath.value || "").trim();
+  const newFbRoot   = (els.bsmFilesbooksPath.value || "").trim();
+  const description = els.bsmDescription.value;
+  const notes       = els.bsmNotes.value;
+
+  // Zmiana nazwy książki / subdir
+  if (newName && newName !== state.subdir) {
+    if (els.subdir) {
+      const opt = Array.from(els.subdir.options).find(o => o.value === state.subdir);
+      if (opt) { opt.value = newName; opt.textContent = newName; }
+    }
+    state.subdir = newName;
+    if (els.subdir) els.subdir.value = newName;
+  }
+
+  // Aktualizacja ścieżek
+  state.audiobooksRoot = newAbRoot;
+  state.filesbooksRoot = newFbRoot;
+
+  // Zapis metadanych do localStorage (po ewentualnej zmianie subdir)
+  saveBookMeta({ description, notes });
+
+  toast("Ustawienia książki zapisane.", "success");
+  closeBookSettingsModal();
+}
+
+// Inicjalizacja handlerów modalu ustawień książki (woła attachEvents)
+function attachBookSettingsModalEvents() {
+  if (els.bsmClose)             els.bsmClose.addEventListener("click", closeBookSettingsModal);
+  if (els.btnBsmCancel)         els.btnBsmCancel.addEventListener("click", closeBookSettingsModal);
+  if (els.btnBsmSave)           els.btnBsmSave.addEventListener("click", saveBookSettings);
+  if (els.bookSettingsModal)    els.bookSettingsModal.querySelector(".modal-backdrop")
+                                  ?.addEventListener("click", closeBookSettingsModal);
+  if (els.btnBsmPickAudiobooks) els.btnBsmPickAudiobooks.addEventListener("click", async () => {
+    const dir = await window.api.openDirectory({ defaultPath: els.bsmAudiobooksPath.value });
+    if (dir) els.bsmAudiobooksPath.value = dir;
+  });
+  if (els.btnBsmPickFilesbooks) els.btnBsmPickFilesbooks.addEventListener("click", async () => {
+    const dir = await window.api.openDirectory({ defaultPath: els.bsmFilesbooksPath.value });
+    if (dir) els.bsmFilesbooksPath.value = dir;
+  });
+}
+
+
+
 function showErrorModal(idx) {
   const frag = state.fragments[idx];
   if (!frag) return;
@@ -476,6 +574,57 @@ let voiceSourcePath = "";
 
 function voicesDir() {
   return `${state.workdir}\\Lectors`;
+}
+
+// Szuka pliku ksiazki w Files_books pasujacego do nazwy folderu (subdir)
+async function autoLoadBookForSubdir(subdir) {
+  if (!subdir) return;
+  const filesDir = fbRoot();
+  try {
+    const res = await window.api.py("list_files", { path: filesDir, extensions: ["epub", "txt", "pdf"] });
+    const files = res?.files || [];
+    if (!files.length) return;
+
+    // Dopasowanie: szukaj najlepszego pliku dla nazwy folderu
+    const subdirLow = subdir.toLowerCase();
+    let best = null;
+
+    // 1. Dokładne dopasowanie (stem == subdir)
+    best = files.find(f => f.stem.toLowerCase() === subdirLow);
+
+    // 2. Stem zaczyna się od subdir (np. "Silos" → "Silos_TTS_tagged_v3")
+    if (!best) best = files.find(f => f.stem.toLowerCase().startsWith(subdirLow));
+
+    // 3. Subdir zaczyna się od stem (np. folder "1. Silos - Hugh Howey" → plik "1. Silos - ...")
+    if (!best) best = files.find(f => subdirLow.startsWith(f.stem.toLowerCase()));
+
+    // 4. Stem zawiera subdir lub subdir zawiera stem (luźne)
+    if (!best) best = files.find(f => f.stem.toLowerCase().includes(subdirLow) || subdirLow.includes(f.stem.toLowerCase()));
+
+    if (!best) {
+      toast(`Brak pliku książki dla "${subdir}" w Files_books.`, "info");
+      return;
+    }
+
+    toast(`Auto-ładowanie: ${best.name}`, "info");
+    await pickBookFromPath(best.path);
+
+    // pickBookFromPath ustawia state.subdir = stem pliku — przywróć do wybranej pozycji z dropdownu
+    if (state.subdir !== subdir) {
+      // Usuń opcję dodaną dla stema pliku jeśli różna od subdir
+      const stemOpt = els.subdir ? Array.from(els.subdir.options).find(o => o.value === state.subdir) : null;
+      if (stemOpt && state.subdir !== subdir) stemOpt.remove();
+      state.subdir = subdir;
+      if (els.subdir) els.subdir.value = subdir;
+    }
+  } catch (_) {
+    // Files_books nie istnieje lub brak uprawnień — cicho ignoruj
+  }
+}
+
+function sanitizeFolderName(name) {
+  // Usun znaki niedozwolone w nazwie folderu Windows
+  return (name || "").replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").trim().replace(/[._]+$/, "").trim() || "Rozdzial";
 }
 
 function openVoiceModal() {
@@ -600,19 +749,19 @@ function playVoiceSample(path, playBtn) {
     els.audioPlayer.pause();
     els.audioPlayer.currentTime = 0;
     // Przywróć wszystkie przyciski play
-    els.voiceList?.querySelectorAll(".voice-play-btn").forEach(b => { b.textContent = "▶ Play"; });
+    els.voiceList?.querySelectorAll(".voice-play-btn").forEach(b => { b.textContent = "▶"; });
     return;
   }
   // Zatrzymaj poprzedni
   els.audioPlayer.pause();
   els.audioPlayer.currentTime = 0;
-  els.voiceList?.querySelectorAll(".voice-play-btn").forEach(b => { b.textContent = "▶ Play"; });
+  els.voiceList?.querySelectorAll(".voice-play-btn").forEach(b => { b.textContent = "▶"; });
   // Zmień kliknięty przycisk na Stop (element przekazany bezpośrednio)
-  if (playBtn) playBtn.textContent = "⏹ Stop";
+  if (playBtn) playBtn.textContent = "⏹";
   els.audioPlayer.src = url;
   els.audioPlayer.play().catch(() => {});
   els.audioPlayer.addEventListener("ended", () => {
-    if (playBtn) playBtn.textContent = "▶ Play";
+    if (playBtn) playBtn.textContent = "▶";
   }, { once: true });
 }
 
@@ -620,6 +769,8 @@ async function refreshVoiceList() {
   try {
     const result = await window.api.py("list_voices", { voices_dir: voicesDir() });
     renderVoiceList(result.voices || []);
+    // Po kazdej zmianie listy lektorow — odswiez tez dropdowny w mapie speaker->voice
+    await refreshVoicesAndMap();
   } catch (_) {
     renderVoiceList([]);
   }
@@ -641,7 +792,7 @@ function renderVoiceList(voices) {
     const escapedSample = en(v.first_sample || "");
     const transcript = v.transcript ? `<div class="voice-card-transcript">${en(v.transcript.slice(0, 140))}…</div>` : "";
     const playBtn = escapedSample
-      ? `<button class="btn btn-ghost voice-play-btn" title="Odtwórz próbkę" data-action="voice-play" data-sample="${escapedSample}">▶ Play</button>`
+      ? `<button class="btn btn-ghost voice-play-btn" title="Odtwórz próbkę" data-action="voice-play" data-sample="${escapedSample}">▶</button>`
       : "";
     return `<div class="voice-card${isActive ? ' voice-card--active' : ''}" data-voice="${escapedName}" data-sample="${escapedSample}">
       <div class="voice-card-header">
@@ -665,7 +816,7 @@ function renderVoiceList(voices) {
 }
 
 async function renameVoicePrompt(name) {
-  const newName = prompt(`Nowa nazwa lektora (było: "${name}"):`, name);
+  const newName = await customPrompt(`Nowa nazwa lektora (było: "${name}"):`, name);
   if (!newName || newName.trim() === name || !newName.trim()) return;
   try {
     await window.api.py("rename_voice", { voice_name: name, new_name: newName.trim(), voices_dir: voicesDir() });
@@ -699,6 +850,66 @@ async function deleteVoice(name) {
     toast(`Błąd usuwania: ${err.message}`, "error");
   }
 }
+
+// ─── Custom prompt (Electron blokuje window.prompt) ──────────────────────────
+function customPrompt(message, defaultValue) {
+  return new Promise((resolve) => {
+    // Lazy create modal at first use
+    let modal = document.getElementById("custom-prompt-modal");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "custom-prompt-modal";
+      modal.className = "modal";
+      modal.hidden = true;
+      modal.innerHTML = `
+        <div class="modal-backdrop"></div>
+        <div class="modal-window" style="max-width:480px;width:90vw;">
+          <div class="modal-header">
+            <h3 id="custom-prompt-title">Podaj wartość</h3>
+            <button class="btn btn-ghost btn-icon" id="custom-prompt-x">×</button>
+          </div>
+          <div class="modal-body">
+            <input type="text" id="custom-prompt-input" style="width:100%;padding:8px;font-size:14px;
+              background:#1f2330;color:#e8eaed;border:1px solid #2a3148;border-radius:4px;">
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" id="custom-prompt-cancel">Anuluj</button>
+            <button class="btn btn-primary" id="custom-prompt-ok">OK</button>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+    }
+    const titleEl  = modal.querySelector("#custom-prompt-title");
+    const inputEl  = modal.querySelector("#custom-prompt-input");
+    const okBtn    = modal.querySelector("#custom-prompt-ok");
+    const cancelBtn= modal.querySelector("#custom-prompt-cancel");
+    const xBtn     = modal.querySelector("#custom-prompt-x");
+    titleEl.textContent = message || "Podaj wartość";
+    inputEl.value = defaultValue || "";
+    modal.hidden = false;
+    setTimeout(() => { inputEl.focus(); inputEl.select(); }, 50);
+
+    function done(val) {
+      modal.hidden = true;
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      xBtn.removeEventListener("click", onCancel);
+      inputEl.removeEventListener("keydown", onKey);
+      resolve(val);
+    }
+    function onOk()     { done(inputEl.value); }
+    function onCancel() { done(null); }
+    function onKey(e)   {
+      if (e.key === "Enter")  { e.preventDefault(); done(inputEl.value); }
+      if (e.key === "Escape") { e.preventDefault(); done(null); }
+    }
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+    xBtn.addEventListener("click", onCancel);
+    inputEl.addEventListener("keydown", onKey);
+  });
+}
+
 
 function openPrepareModal() {
   // Pozwala otworzyć modal nawet bez załadowanej książki
@@ -800,9 +1011,32 @@ async function pickBookFromPath(path) {
         const sep = (els.speakerVoiceMap.value && !els.speakerVoiceMap.value.endsWith("\n")) ? "\n" : "";
         els.speakerVoiceMap.value = (els.speakerVoiceMap.value || "") + sep + linesToAdd.join("\n");
         toast("Wykryto " + detectedSpeakers.length + " postaci w ksiazce — przypisz im lektorow w mapie.", "info");
+        // Przebuduj UI karty postać/lektor zeby zobaczyc nowe postacie
+        buildSpeakerVoiceMapUI();
       } else {
         toast("Wykryto " + detectedSpeakers.length + " postaci — wszystkie sa juz w mapie.", "info");
       }
+    }
+
+    // === Auto-utwórz katalog Audiobooks\{nazwa ksiazki} ===
+    const rawBookName = state.bookPath.split(/[\\/]/).pop().replace(/\.[^.]+$/, "");
+    state.bookName = rawBookName;
+    const bookSubdir = rawBookName;
+    const bookDirPath = `${abRoot()}\\${rawBookName}`;
+    try {
+      await window.api.py("ensure_dir", { path: bookDirPath });
+    } catch (_) {}
+    // Dodaj do dropdownu jezeli nie istnieje i ustaw aktywny
+    if (els.subdir) {
+      let opt = Array.from(els.subdir.options).find(o => o.value === bookSubdir);
+      if (!opt) {
+        opt = document.createElement("option");
+        opt.value = bookSubdir;
+        opt.textContent = bookSubdir;
+        els.subdir.appendChild(opt);
+      }
+      els.subdir.value = bookSubdir;
+      state.subdir = bookSubdir;
     }
 
     if (state.chapters.length === 0) {
@@ -979,7 +1213,10 @@ async function runSelectedServer(selectedIdx, wd, subdir) {
     if (!groups.has(key)) {
       groups.set(key, { refAudioPath: raPath, refTextPath: rtPath, label: voice.label || "default", fragments: [] });
     }
-    groups.get(key).fragments.push({ idx: idx + 1, text: frag.text });
+    // Ustaw per-fragment subdir: Audiobooks\{ksiazka}\{rozdzial}
+    const chapterFolder = sanitizeFolderName(frag.chapterTitle || `Rozdzial_${(frag.chapterIdx || 0) + 1}`);
+    const fragSubdir = `Audiobooks\\${state.subdir}\\${chapterFolder}`;
+    groups.get(key).fragments.push({ idx: idx + 1, text: frag.text, frag_subdir: fragSubdir });
   }
 
   // Mapa fileIdx → fragArrayIdx dla progress eventów
@@ -1128,7 +1365,7 @@ async function checkAutoMergeChapters() {
     const paths = chFrags.map(f => f.wavPath);
     const bookName = (state.subdir || "audiobook").replace(/[^a-zA-Z0-9_ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/g, "_");
     const outName = `Rozdzial${chIdx + 1}_${bookName}.mp3`;
-    const outPath = `${state.workdir}\\Audiobooks\\${state.subdir}\\${outName}`;
+    const outPath = `${abRoot()}\\${state.subdir}\\${outName}`;
     // Sprawdź czy plik już istnieje (avoid double merge)
     try {
       const ex = await window.api.py("exists", { path: outPath });
@@ -1353,6 +1590,16 @@ function attachEvents() {
     });
   }
 
+    if (els.btnReloadApp) {
+    els.btnReloadApp.addEventListener("click", () => {
+      if (window.api && window.api.reloadApp) {
+        window.api.reloadApp();
+      } else {
+        location.reload();
+      }
+    });
+  }
+
   if (els.voiceSplitBtn) els.voiceSplitBtn.addEventListener("click", splitVoice);
 
   // Delegacja zdarzeń dla przycisków na kartach lektorów (CSP blokuje onclick=)
@@ -1363,7 +1610,7 @@ function attachEvents() {
       const action = btn.dataset.action;
       const name   = btn.dataset.voice || btn.closest("[data-voice]")?.dataset.voice || "";
       const sample = btn.dataset.sample || btn.closest("[data-sample]")?.dataset.sample || "";
-      if (action === "voice-play")     { playVoiceSample(sample, el); return; }
+      if (action === "voice-play")     { playVoiceSample(sample, btn); return; }
       if (action === "voice-activate") { await activateVoice(name, sample); return; }
       if (action === "voice-rename")   { await renameVoicePrompt(name); return; }
       if (action === "voice-delete")   { await deleteVoice(name); return; }
@@ -1404,6 +1651,12 @@ function attachEvents() {
 
   els.subdir.addEventListener("input", () => {
     state.subdir = els.subdir.value.trim() || "Silos";
+    autoLoadBookForSubdir(state.subdir);
+  });
+  // "change" obsługuje wybór myszą z dropdownu
+  els.subdir.addEventListener("change", () => {
+    state.subdir = els.subdir.value.trim() || "Silos";
+    autoLoadBookForSubdir(state.subdir);
   });
 
   els.btnLoadSplit.addEventListener("click", loadAndSplit);
@@ -1543,37 +1796,33 @@ function attachEvents() {
     });
   }
 
-  // Wybierz podkatalog książki — skanuj Audiobooks/ obok workdir
+  // Wybierz plik książki na podstawie aktywnej pozycji w dropdownie
   if (els.btnPickSubdir) {
     els.btnPickSubdir.addEventListener("click", async () => {
-      const wd = state.workdir || els.workdir.value.trim();
-      const audiobooksDir = wd + "\\Audiobooks";
-      // Spróbuj otworzyć dialog startując od Audiobooks/
-      const dir = await window.api.openDirectory({ defaultPath: audiobooksDir });
-      if (!dir) return;
-      const name = dir.split(/[\\/]/).pop();
-      // Ustaw workdir na katalog nadrzędny (Audiobooks/)
-      const parentDir = dir.substring(0, dir.length - name.length - 1);
-      // Dodaj opcję jeśli nie istnieje
-      let opt = Array.from(els.subdir.options).find(o => o.value === name);
-      if (!opt) {
-        opt = document.createElement("option");
-        opt.value = name;
-        opt.textContent = name;
-        els.subdir.appendChild(opt);
-      }
-      els.subdir.value = name;
-      state.subdir = name;
-      // Jeśli wybrany folder jest w Audiobooks, zaktualizuj workdir na rodzica
-      if (parentDir && parentDir.toLowerCase().endsWith("audiobooks")) {
-        const grandParent = parentDir.substring(0, parentDir.length - "audiobooks".length - 1);
-        if (grandParent) {
-          state.workdir = grandParent;
-          els.workdir.value = grandParent;
-        }
-      }
-      toast(`Wybrano książkę: ${name}`, "success");
+      const subdir = (els.subdir?.value || state.subdir || "").trim();
+      if (!subdir) { toast("Najpierw wybierz książkę z listy.", "error"); return; }
+      await autoLoadBookForSubdir(subdir);
     });
+  }
+
+  // 📁 Otwórz folder wygenerowanej książki w eksploratorze
+  if (els.btnOpenAudiobooks) {
+    els.btnOpenAudiobooks.addEventListener("click", () => {
+      const folder = `${abRoot()}\\${state.subdir || ""}`;
+      window.api.openInExplorer(folder);
+    });
+  }
+
+  // 📂 Otwórz folder pliku źródłowego książki
+  if (els.btnOpenFilesbooks) {
+    els.btnOpenFilesbooks.addEventListener("click", () => {
+      window.api.openInExplorer(fbRoot());
+    });
+  }
+
+  // ⚙️ Ustawienia książki
+  if (els.btnBookSettings) {
+    els.btnBookSettings.addEventListener("click", () => openBookSettingsModal());
   }
 
   // Skocz do fragmentu
@@ -1858,11 +2107,27 @@ function attachBackendEvents() {
   });
 }
 
+// Helper: po zmianie w lektorach (add/delete/rename) odswiez dropdowny w mapie speaker->voice
+async function refreshVoicesAndMap() {
+  await loadAvailableVoices();
+  // Przebuduj UI z aktualnymi opcjami dropdownow, zachowujac dotychczasowe mapowanie
+  buildSpeakerVoiceMapUI();
+}
+
+
 async function bootstrap() {
   setBackendStatus("ladowanie backendu...");
   attachEvents();
+  attachBookSettingsModalEvents();
   attachBackendEvents();
   updateButtonsState();
+
+  state.workdir = els.workdir.value.trim() || state.workdir;
+
+  // KRYTYCZNE: wczytaj liste dostepnych lektorow PRZED zbudowaniem speaker->voice UI,
+  // inaczej dropdowny mialyby tylko "Maciej" jako opcje.
+  await loadAvailableVoices();
+
   buildSpeakerVoiceMapUI();
   attachSpeakerVoiceMapEvents();
 
@@ -1883,9 +2148,6 @@ async function bootstrap() {
 
   // Skanuj podfoldery Audiobooks/ i wypełnij listę książek
   await scanAudiobooksSubdirs();
-
-  // Załaduj dostępne głosy
-  await loadAvailableVoices();
 }
 
 // ====== Multi-voice speaker support ======
@@ -1896,12 +2158,14 @@ let state_availableVoices = [];
 async function scanAudiobooksSubdirs() {
   // Pobierz listę podfolderów Audiobooks/ przez backend
   const wd = state.workdir;
-  const audiobooksDir = wd + "\\Audiobooks";
+  const audiobooksDir = abRoot();
   try {
     const res = await window.api.py("list_subdirs", { path: audiobooksDir });
     const dirs = res?.dirs || res?.subdirs || [];
     if (dirs.length === 0) return;
-    // Wyczyść listę i dodaj znalezione foldery
+    // Zachowaj aktualną wartość
+    const current = state.subdir || els.subdir?.value || "";
+    // Wyczyść i dodaj znalezione foldery (value = nazwa folderu)
     els.subdir.innerHTML = "";
     dirs.forEach(name => {
       const opt = document.createElement("option");
@@ -1909,13 +2173,12 @@ async function scanAudiobooksSubdirs() {
       opt.textContent = name;
       els.subdir.appendChild(opt);
     });
-    // Wybierz pierwszą lub zachowaj bieżącą wartość
-    const current = state.subdir;
+    // Przywróć poprzednią selekcję lub wybierz pierwszą
     const match = dirs.find(d => d === current);
     els.subdir.value = match || dirs[0];
     state.subdir = els.subdir.value;
   } catch (_) {
-    // Backend nie obsługuje list_subdirs — brak zmian, użytkownik może kliknąć Wybierz
+    // Backend nie obsługuje list_subdirs — brak zmian
   }
 }
 

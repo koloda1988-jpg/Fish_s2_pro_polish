@@ -24,6 +24,9 @@
       <span class="badge" id="backend-status">backend...</span>
     </div>
     <div class="header-right">
+      <button class="btn btn-ghost" id="btn-reload-app" title="Odśwież interfejs (F5) — bez restartu serwera TTS">
+        🔄 Odśwież
+      </button>
       <button class="btn btn-secondary" id="btn-voice-creation" title="Tworzenie profili lektorów z pliku audio">
         🎙 Lektorzy
       </button>
@@ -49,16 +52,19 @@
         <button class="btn btn-secondary" id="btn-pick-book">Wybierz</button>
       </div>
     </div>
-    <div class="field field-narrow">
+    <div class="field field-narrow" style="align-items:flex-start;">
       <label>Katalog roboczy</label>
       <input type="hidden" id="workdir" value="C:\Users\kolod\Documents\Claude\Projects\Audiobook\Audiobook (1)\wersja 2">
-      <button class="btn btn-secondary" id="btn-default-workdir" style="width:100%;" title="Otwórz katalog programu w eksploratorze">📁 Katalog programu</button>
+      <button class="btn btn-secondary btn-xs" id="btn-default-workdir" title="Otwórz katalog programu w eksploratorze">📁 Katalog programu</button>
     </div>
     <div class="field field-narrow">
       <label>Książka (Audiobooks/...)</label>
       <div class="input-with-button">
+        <button class="btn btn-secondary btn-icon btn-xs" id="btn-open-audiobooks" title="Otwórz folder wygenerowanej książki">📁</button>
+        <button class="btn btn-secondary btn-icon btn-xs" id="btn-open-filesbooks" title="Otwórz folder pliku źródłowego książki">📂</button>
+        <button class="btn btn-secondary btn-icon btn-xs" id="btn-book-settings" title="Ustawienia książki">⚙️</button>
         <select id="subdir" style="flex:1;"><option value="Silos">Silos</option></select>
-        <button class="btn btn-secondary" id="btn-pick-subdir" title="Dodaj lub odśwież listę">Wybierz</button>
+        <button class="btn btn-secondary" id="btn-pick-subdir" title="Wybierz plik książki">Wybierz</button>
       </div>
     </div>
     <div class="field field-narrow">
@@ -553,6 +559,49 @@
   <!-- Ukryty audio element do odtwarzania -->
   <audio id="audio-player" hidden></audio>
   <audio id="voice-preview-player" hidden></audio>
+
+  <!-- Modal: ustawienia książki -->
+  <div class="modal" id="book-settings-modal" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-window modal-window--book-settings">
+      <div class="modal-header">
+        <h3>⚙️ Ustawienia książki</h3>
+        <button class="btn btn-ghost btn-icon" id="bsm-close">×</button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:12px;">
+        <div class="field">
+          <label>Nazwa książki (folder w Audiobooks)</label>
+          <input type="text" id="bsm-book-name" placeholder="np. Silos">
+        </div>
+        <div class="field">
+          <label>Folder wynikowy (Audiobooks)</label>
+          <div class="input-with-button">
+            <input type="text" id="bsm-audiobooks-path">
+            <button class="btn btn-secondary btn-icon" id="btn-bsm-pick-audiobooks" title="Wybierz folder">📁</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Folder plików źródłowych (Files_books)</label>
+          <div class="input-with-button">
+            <input type="text" id="bsm-filesbooks-path">
+            <button class="btn btn-secondary btn-icon" id="btn-bsm-pick-filesbooks" title="Wybierz folder">📁</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Krótki opis książki</label>
+          <textarea id="bsm-description" rows="3" placeholder="np. dystopia, postapo, Hugh Howey, 2012..."></textarea>
+        </div>
+        <div class="field">
+          <label>Adnotacje / notatki własne</label>
+          <textarea id="bsm-notes" rows="5" placeholder="Twoje prywatne notatki do tej książki..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btn-bsm-cancel">Anuluj</button>
+        <button class="btn btn-primary" id="btn-bsm-save">Zapisz</button>
+      </div>
+    </div>
+  </div>
 
   <script src="renderer.js"></script>
 </body>

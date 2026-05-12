@@ -1148,7 +1148,7 @@ def handle(method, params):
             "ref_audio_bytes": ref_audio_bytes,
             "ref_audio_name":  ref_audio_name,
             "ref_text":  ref_text,
-            "fragments": [(int(t["idx"]), t["text"], None) for t in params["fragments"]],
+            "fragments": [(int(t["idx"]), t["text"], t.get("frag_subdir") or None) for t in params["fragments"]],
             "phonetic_map": params.get("phonetic_map") or None,
             "gpu_workers": int(params.get("gpu_workers", 1)),
             "timeout":   int(params.get("timeout", 1800)),
@@ -1260,6 +1260,22 @@ def handle(method, params):
             if os.path.isdir(os.path.join(base, d)) and not d.startswith(".")
         )
         return {"dirs": dirs}
+    if method == "list_files":
+        base = params.get("path", "")
+        allowed_ext = [e.lower().lstrip(".") for e in (params.get("extensions") or ["epub", "txt", "pdf"])]
+        if not base or not os.path.isdir(base):
+            return {"files": []}
+        files = []
+        for entry in sorted(os.listdir(base)):
+            if os.path.isfile(os.path.join(base, entry)):
+                stem, ext = os.path.splitext(entry)
+                if ext.lower().lstrip(".") in allowed_ext:
+                    files.append({
+                        "name": entry,
+                        "stem": stem,
+                        "path": os.path.join(base, entry),
+                    })
+        return {"files": files}
     if method == "list_voices":
         voices_dir = params.get("voices_dir", "")
         voices = []

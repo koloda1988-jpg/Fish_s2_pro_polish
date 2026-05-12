@@ -195,6 +195,13 @@ body {
   justify-content: center;
 }
 
+.btn-xs {
+  font-size: 10px;
+  padding: 4px 8px;
+  min-width: unset;
+  font-weight: 600;
+}
+
 .config-bar {
   margin-top: 12px;
   background: var(--bg-card);
@@ -203,7 +210,7 @@ body {
   padding: 14px;
   box-shadow: var(--shadow-1);
   display: grid;
-  grid-template-columns: 2fr 2fr 1fr 1.6fr;
+  grid-template-columns: 2fr auto 2fr 1.4fr;
   gap: 12px;
   align-items: end;
 }
@@ -910,6 +917,10 @@ input[type="checkbox"] {
 .modal-window--error {
   border: 2px solid var(--error);
   box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.2), var(--shadow);
+}
+
+.modal-window--book-settings {
+  width: min(500px, 95vw);
 }
 
 .modal-window--voice {
