@@ -1319,6 +1319,107 @@ input[type="checkbox"] {
   padding: 2px 8px;
   font-size: 11px;
 }
+
+/* ======================================================
+   MODELS MANAGER MODAL
+   ====================================================== */
+
+.modal-window--models {
+  border: 2px solid #3b82f6;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2), 0 18px 40px rgba(0,0,0,0.35);
+  width: min(640px, 96vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-window--models .modal-header {
+  background: #111827;
+  border-bottom-color: #1e3a5f;
+}
+
+.modal-window--models .modal-header h3 {
+  color: #e8eaed;
+}
+
+.modal-window--models .modal-footer {
+  background: #111827;
+  border-top-color: #1e3a5f;
+}
+
+.models-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 20px;
+  overflow-y: auto;
+  background: #0d1117;
+  flex: 1;
+  min-height: 0;
+}
+
+.models-section {
+  background: #161b27;
+  border: 1px solid #2a3148;
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.models-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #8a8f99;
+  margin-bottom: 10px;
+}
+
+.models-file-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #1e2840;
+}
+
+.models-file-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.models-progress-track {
+  height: 8px;
+  background: #2a3148;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.models-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  border-radius: 4px;
+  transition: width 0.35s ease;
+}
+
+.modal-window--models .btn-ghost {
+  border-color: #2a3a5c;
+  color: #8aa9ff;
+}
+
+.modal-window--models .btn-ghost:hover {
+  background: rgba(91, 140, 255, 0.12);
+}
+
+.modal-window--models .btn-secondary {
+  background: #1e2840;
+  color: #c5d0e8;
+  border: 1px solid #2a3a5c;
+}
+
+.modal-window--models .btn-secondary:hover {
+  background: #253052;
+}
 .voice-active-badge {
   display: inline-block;
   background: rgba(168,85,247,.15);

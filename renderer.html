@@ -27,6 +27,9 @@
       <button class="btn btn-ghost" id="btn-reload-app" title="Odśwież interfejs (F5) — bez restartu serwera TTS">
         🔄 Odśwież
       </button>
+      <button class="btn btn-secondary" id="btn-models" title="Pobierz i zarządzaj modelami TTS">
+        📦 Modele
+      </button>
       <button class="btn btn-secondary" id="btn-voice-creation" title="Tworzenie profili lektorów z pliku audio">
         🎙 Lektorzy
       </button>
@@ -625,6 +628,60 @@
           <button class="btn btn-secondary" id="btn-bsm-cancel">Anuluj</button>
           <button class="btn btn-primary" id="btn-bsm-save">Zapisz</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Models Manager -->
+  <div class="modal" id="models-modal" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-window modal-window--models">
+      <div class="modal-header">
+        <h3>📦 Modele TTS</h3>
+        <button class="btn btn-ghost btn-icon" id="models-close">×</button>
+      </div>
+      <div class="modal-body models-modal-body">
+
+        <!-- Status lokalny -->
+        <div class="models-section">
+          <div class="models-section-title">📁 Zainstalowane</div>
+          <div id="models-local-list" style="font-size:13px;">Sprawdzam…</div>
+          <button class="btn btn-ghost" id="btn-models-open-dir"
+            style="margin-top:10px;font-size:12px;padding:4px 12px;">
+            📂 Otwórz folder modeli
+          </button>
+        </div>
+
+        <!-- Pobieranie z HuggingFace -->
+        <div class="models-section">
+          <div class="models-section-title" style="display:flex;justify-content:space-between;align-items:center;">
+            <span>⬇ Pobierz z HuggingFace</span>
+            <span style="font-size:11px;font-weight:400;color:#8a8f99;">fishaudio/fish-speech-1.5</span>
+          </div>
+          <div id="models-remote-list">
+            <div style="color:#8a8f99;font-size:13px;">Wczytywanie listy…</div>
+          </div>
+        </div>
+
+        <!-- Postep pobierania -->
+        <div id="models-download-progress" style="display:none;" class="models-section">
+          <div class="models-section-title" id="models-dl-filename">Pobieranie…</div>
+          <div class="models-progress-track">
+            <div class="models-progress-fill" id="models-dl-bar"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
+            <span id="models-dl-size" style="font-size:11px;color:#8a8f99;"></span>
+            <span id="models-dl-percent" style="font-size:13px;font-weight:600;color:#5b8cff;">0%</span>
+          </div>
+          <button class="btn btn-secondary" id="btn-models-cancel"
+            style="margin-top:10px;font-size:12px;padding:4px 12px;">
+            ✕ Anuluj pobieranie
+          </button>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="models-close-footer">Zamknij</button>
       </div>
     </div>
   </div>

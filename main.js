@@ -13,6 +13,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const http = require('http');
+const https = require('https');
 
 // ─── Konfiguracja ───────────────────────────────────────────────────────────
 
@@ -20,9 +21,19 @@ const http = require('http');
 // env var COMFYUI_PYTHON.
 const DEFAULT_COMFY_PYTHON = 'E:\\StabilityMatrix\\Packages\\ComfyUI\\venv\\Scripts\\python.exe';
 
-// s2_server.py lezy w tym samym katalogu co main.js (struktura splaszczona).
-const PROJECT_DIR = __dirname;  // po splaszczeniu: apka i s2_server.py w tym samym katalogu
-const S2_SERVER_PY = path.join(PROJECT_DIR, 's2_server.py');
+// Kiedy apka jest spakowana przez electron-builder:
+//   process.resourcesPath  = <InstallDir>\resources
+//   INSTALL_DIR            = <InstallDir>             (tu lezy venv\ i models\)
+//   PYTHON_SCRIPTS_DIR     = <InstallDir>\resources   (tu extraResources: s2_server.py itp.)
+// W trybie dev:
+//   INSTALL_DIR = PYTHON_SCRIPTS_DIR = __dirname
+const INSTALL_DIR         = app.isPackaged ? path.dirname(process.resourcesPath) : __dirname;
+const PYTHON_SCRIPTS_DIR  = app.isPackaged ? process.resourcesPath               : __dirname;
+const S2_SERVER_PY        = path.join(PYTHON_SCRIPTS_DIR, 's2_server.py');
+
+const HF_REPO = 'fishaudio/fish-speech-1.5';
+const HF_BASE = 'https://huggingface.co';
+let _dlController = null;  // kontroler anulowania pobierania modelu
 
 const S2_HOST = '127.0.0.1';
 const S2_PORT = 8080;
@@ -112,7 +123,13 @@ function setSplashError(msg) {
 // ─── s2_server.py spawn ────────────────────────────────────────────────────
 
 function getComfyPython() {
-  return process.env.COMFYUI_PYTHON || DEFAULT_COMFY_PYTHON;
+  // 1. Nadpisanie przez env var
+  if (process.env.COMFYUI_PYTHON) return process.env.COMFYUI_PYTHON;
+  // 2. Lokalne venv (stworzone przez instalator lub install.ps1)
+  const localVenv = path.join(INSTALL_DIR, 'venv', 'Scripts', 'python.exe');
+  if (fs.existsSync(localVenv)) return localVenv;
+  // 3. Domyślny venv ComfyUI (tryb dev / legacy)
+  return DEFAULT_COMFY_PYTHON;
 }
 
 function startS2Server() {
@@ -129,7 +146,7 @@ function startS2Server() {
 
   console.log('[s2] Spawn:', py, S2_SERVER_PY);
   s2Proc = spawn(py, [S2_SERVER_PY], {
-    cwd: PROJECT_DIR,
+    cwd: PYTHON_SCRIPTS_DIR,
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
     env: {
@@ -145,6 +162,8 @@ function startS2Server() {
       S2_ATTENTION: process.env.S2_ATTENTION || 'sage_attention',
       S2_DEVICE: process.env.S2_DEVICE || 'cuda',
       S2_COMPILE: process.env.S2_COMPILE || '1',
+      // Jawna ścieżka do modelu — <InstallDir>\models\s2-pro
+      S2_MODEL_PATH: process.env.S2_MODEL_PATH || path.join(INSTALL_DIR, 'models', 's2-pro'),
     },
   });
 
@@ -241,21 +260,25 @@ function pollHealth() {
 // ─── python_backend.py spawn (JSON-RPC) ─────────────────────────────────────
 
 function getBackendLaunchConfig() {
-  // W trybie packaged używamy bundled exe, w dev preferujemy venv ComfyUI
-  // (ten sam Python ma wszystkie zależności jak s2_server: aiohttp, ebooklib,
-  // pypdf, beautifulsoup itp.)
   if (app.isPackaged) {
+    // Tryb zainstalowany: używamy lokalnego venv + python_backend.py z resources
+    const venvPy     = path.join(INSTALL_DIR, 'venv', 'Scripts', 'python.exe');
+    const scriptPath = path.join(process.resourcesPath, 'python_backend.py');
+    if (fs.existsSync(venvPy)) {
+      return { command: venvPy, args: [scriptPath], mode: 'local-venv' };
+    }
+    // Fallback: skompilowane exe (jeśli pyinstaller build był wykonany)
     const exePath = path.join(process.resourcesPath, 'python_backend.exe');
     if (fs.existsSync(exePath)) {
       return { command: exePath, args: [], mode: 'bundled' };
     }
   }
+  // Tryb dev: venv ComfyUI lub lokalne venv
   const scriptPath = path.join(__dirname, 'python_backend.py');
   const py = getComfyPython();
   if (fs.existsSync(py)) {
     return { command: py, args: [scriptPath], mode: 'comfy-venv' };
   }
-  // fallback: systemowy Python
   if (process.platform === 'win32') {
     return { command: 'py', args: ['-3', scriptPath], mode: 'system-python' };
   }
@@ -267,7 +290,7 @@ function startPythonBackend() {
   console.log('[main] Backend:', backend.mode, backend.command, backend.args);
 
   pyProc = spawn(backend.command, backend.args, {
-    cwd: __dirname,
+    cwd: PYTHON_SCRIPTS_DIR,
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
     env: {
@@ -476,8 +499,9 @@ ipcMain.handle('dialog:saveFile', async (_evt, opts) => {
 ipcMain.handle('shell:openFile', async (_evt, p) => shell.openPath(p));
 
 ipcMain.handle('config:getDefaultWorkdir', async () => {
-  // Po splaszczeniu struktury, katalog programu = katalog main.js = katalog projektu.
-  return PROJECT_DIR;
+  // W trybie zainstalowanym: katalog instalacji (<InstallDir>)
+  // W trybie dev: katalog projektu (__dirname)
+  return INSTALL_DIR;
 });
 ipcMain.handle('shell:openFolder', async (_evt, p) => shell.openPath(p));
 
@@ -517,6 +541,123 @@ ipcMain.handle('gemini:prepareBook', async (_evt, payload) => {
   }
   fs.writeFileSync(outputPath, aiText, { encoding: 'utf8' });
   return { outputPath, size: Buffer.byteLength(aiText, 'utf8'), model: aiResult.model };
+});
+
+// ─── Models manager IPC ─────────────────────────────────────────────────────
+
+ipcMain.handle('models:getLocalStatus', async () => {
+  const modelsDir = path.join(INSTALL_DIR, 'models', 's2-pro');
+  try {
+    if (!fs.existsSync(modelsDir)) return { installed: false, files: [], dir: modelsDir };
+    const files = fs.readdirSync(modelsDir).map(f => {
+      const stat = fs.statSync(path.join(modelsDir, f));
+      return { name: f, size: stat.size };
+    });
+    const hasModel = files.some(f => /\.(pth|safetensors|ckpt|bin)$/i.test(f.name));
+    const hasCodec = files.some(f => /codec|firefly|decoder|vocoder/i.test(f.name));
+    return { installed: hasModel && hasCodec, hasModel, hasCodec, files, dir: modelsDir };
+  } catch (e) {
+    return { installed: false, error: e.message, files: [], dir: modelsDir };
+  }
+});
+
+ipcMain.handle('models:listRemote', async () => {
+  return new Promise((resolve, reject) => {
+    const req = https.get(
+      `${HF_BASE}/api/models/${HF_REPO}`,
+      { headers: { 'User-Agent': 'AudiobookGenerator/3.1' } },
+      (res) => {
+        let body = '';
+        res.on('data', c => body += c);
+        res.on('end', () => {
+          try {
+            const data = JSON.parse(body);
+            const files = (data.siblings || []).map(s => ({ name: s.rfilename, size: s.size || 0 }));
+            resolve(files);
+          } catch (e) { reject(new Error('Błąd parsowania HF API: ' + e.message)); }
+        });
+        res.on('error', reject);
+      }
+    );
+    req.on('error', reject);
+    req.setTimeout(20000, () => { req.destroy(); reject(new Error('Timeout listy plików HF')); });
+  });
+});
+
+ipcMain.handle('models:startDownload', async (_evt, { filename, repo }) => {
+  const modelsDir = path.join(INSTALL_DIR, 'models', 's2-pro');
+  if (!fs.existsSync(modelsDir)) fs.mkdirSync(modelsDir, { recursive: true });
+  const targetPath = path.join(modelsDir, filename);
+  const repoToUse  = repo || HF_REPO;
+  const downloadUrl = `${HF_BASE}/${repoToUse}/resolve/main/${encodeURIComponent(filename)}`;
+  _dlController = { cancelled: false };
+  const ctrl = _dlController;
+
+  return new Promise((resolve, reject) => {
+    const doGet = (u, depth = 0) => {
+      if (depth > 6)        return reject(new Error('Za dużo przekierowań'));
+      if (ctrl.cancelled)   return reject(new Error('Anulowano'));
+      const parsedUrl = new URL(u);
+      const mod = parsedUrl.protocol === 'https:' ? https : http;
+      const req = mod.get(u, { headers: { 'User-Agent': 'AudiobookGenerator/3.1' } }, (res) => {
+        if ([301, 302, 307, 308].includes(res.statusCode)) {
+          res.resume();
+          doGet(res.headers.location, depth + 1);
+          return;
+        }
+        if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
+        const totalSize = parseInt(res.headers['content-length'] || '0', 10);
+        let downloaded = 0, lastSent = 0;
+        const tmpPath = targetPath + '.tmp';
+        const ws = fs.createWriteStream(tmpPath);
+        ctrl.req = req;
+        res.on('data', (chunk) => {
+          if (ctrl.cancelled) { req.destroy(); ws.destroy(); try { fs.unlinkSync(tmpPath); } catch (_) {} return; }
+          downloaded += chunk.length;
+          const now = Date.now();
+          if (now - lastSent > 400) {
+            lastSent = now;
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('models:progress', {
+                filename, downloaded, total: totalSize,
+                progress: totalSize > 0 ? downloaded / totalSize : 0
+              });
+            }
+          }
+        });
+        res.pipe(ws);
+        ws.on('finish', () => {
+          if (ctrl.cancelled) { try { fs.unlinkSync(tmpPath); } catch (_) {} return; }
+          fs.renameSync(tmpPath, targetPath);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('models:progress', {
+              filename, downloaded: totalSize || downloaded, total: totalSize || downloaded,
+              progress: 1, done: true
+            });
+          }
+          resolve({ ok: true, path: targetPath });
+        });
+        ws.on('error', (err) => { try { fs.unlinkSync(tmpPath); } catch (_) {} reject(err); });
+        res.on('error', (err) => { try { fs.unlinkSync(tmpPath); } catch (_) {} reject(err); });
+      });
+      req.on('error', reject);
+    };
+    doGet(downloadUrl);
+  });
+});
+
+ipcMain.handle('models:cancelDownload', () => {
+  if (_dlController) {
+    _dlController.cancelled = true;
+    try { _dlController.req?.destroy(); } catch (_) {}
+    _dlController = null;
+  }
+});
+
+ipcMain.handle('models:openDir', () => {
+  const modelsDir = path.join(INSTALL_DIR, 'models', 's2-pro');
+  if (!fs.existsSync(modelsDir)) fs.mkdirSync(modelsDir, { recursive: true });
+  shell.openPath(modelsDir);
 });
 
 // ─── Lifecycle: kill obu podprocesów przy zamknięciu ────────────────────────

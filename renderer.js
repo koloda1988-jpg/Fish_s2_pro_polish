@@ -2381,3 +2381,165 @@ function attachSpeakerVoiceMapEvents() {
 }
 
 bootstrap();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MODELS MANAGER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _modelsRemoteFiles  = [];
+let _modelsLocalStatus  = { installed: false, files: [] };
+let _modelsDownloading  = false;
+let _modelsProgressUnsub = null;
+
+function formatFileSize(bytes) {
+  if (!bytes || bytes === 0) return '?';
+  if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(1) + ' GB';
+  if (bytes >= 1048576)    return (bytes / 1048576).toFixed(0) + ' MB';
+  return (bytes / 1024).toFixed(0) + ' KB';
+}
+
+async function openModelsModal() {
+  document.getElementById('models-modal').hidden = false;
+  await refreshModelsLocal();
+  loadModelsRemote();
+  if (_modelsProgressUnsub) _modelsProgressUnsub();
+  _modelsProgressUnsub = window.api.onModelProgress(onModelDownloadProgress);
+}
+
+function closeModelsModal() {
+  document.getElementById('models-modal').hidden = true;
+  if (_modelsProgressUnsub) { _modelsProgressUnsub(); _modelsProgressUnsub = null; }
+}
+
+async function refreshModelsLocal() {
+  const listEl = document.getElementById('models-local-list');
+  listEl.innerHTML = '<span style="color:#8a8f99;">Sprawdzam…</span>';
+  try {
+    _modelsLocalStatus = await window.api.getModelsStatus();
+    const { files, dir, installed, hasModel, hasCodec } = _modelsLocalStatus;
+    if (!files || files.length === 0) {
+      listEl.innerHTML = `<div style="color:#ef4444;">⚠ Brak plików modelu w folderze:</div>
+        <div style="font-size:11px;color:#5b6070;word-break:break-all;margin-top:4px;">${escapeHtml(dir)}</div>`;
+    } else {
+      const badge = installed
+        ? '<div style="color:#10b981;font-weight:600;margin-bottom:6px;">✅ Model gotowy</div>'
+        : `<div style="color:#f59e0b;font-weight:600;margin-bottom:6px;">⚠ Niekompletny &mdash; brak ${!hasModel ? 'modelu (.pth)' : 'kodeka (codec.pth)'}</div>`;
+      const rows = files.map(f =>
+        `<div style="font-size:12px;color:#aab0bc;margin-top:3px;">📄 ${escapeHtml(f.name)}
+          <span style="color:#5b6070;margin-left:6px;">${formatFileSize(f.size)}</span></div>`
+      ).join('');
+      listEl.innerHTML = badge + rows;
+    }
+    if (_modelsRemoteFiles.length > 0) renderModelsRemoteList();
+  } catch (e) {
+    listEl.innerHTML = `<span style="color:#ef4444;">Błąd: ${escapeHtml(e.message)}</span>`;
+  }
+}
+
+async function loadModelsRemote() {
+  const remoteEl = document.getElementById('models-remote-list');
+  remoteEl.innerHTML = '<div style="color:#8a8f99;font-size:13px;">Pobieranie listy z HuggingFace…</div>';
+  try {
+    _modelsRemoteFiles = await window.api.listRemoteModels();
+    renderModelsRemoteList();
+  } catch (e) {
+    remoteEl.innerHTML = `<div style="color:#ef4444;font-size:13px;">Błąd: ${escapeHtml(e.message)}</div>
+      <div style="font-size:12px;color:#8a8f99;margin-top:6px;">Pobierz ręcznie z: huggingface.co/fishaudio/fish-speech-1.5</div>`;
+  }
+}
+
+function renderModelsRemoteList() {
+  const remoteEl = document.getElementById('models-remote-list');
+  if (!_modelsRemoteFiles.length) {
+    remoteEl.innerHTML = '<div style="color:#8a8f99;">Brak plików w repozytorium.</div>';
+    return;
+  }
+  const localNames = new Set((_modelsLocalStatus.files || []).map(f => f.name));
+  const rows = _modelsRemoteFiles.map(f => {
+    const isLocal  = localNames.has(f.name);
+    const sizeStr  = formatFileSize(f.size);
+    const dlBtn    = isLocal
+      ? `<span style="color:#10b981;font-size:14px;">✅</span>`
+      : `<button class="btn btn-primary btn-xs" style="min-width:86px;"
+           data-action="model-download" data-filename="${escapeHtml(f.name)}">⬇ Pobierz</button>`;
+    return `<div class="models-file-row" id="models-row-${CSS.escape(f.name)}">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:13px;font-weight:500;word-break:break-all;">${escapeHtml(f.name)}</div>
+        <div style="font-size:11px;color:#5b6070;">${sizeStr}</div>
+      </div>
+      <div style="flex-shrink:0;">${dlBtn}</div>
+    </div>`;
+  }).join('');
+  remoteEl.innerHTML = rows;
+}
+
+async function startModelDownload(filename) {
+  if (_modelsDownloading) { toast('Inne pobieranie w toku — anuluj je najpierw.', 'error'); return; }
+  _modelsDownloading = true;
+  const progressArea = document.getElementById('models-download-progress');
+  const dlFilename   = document.getElementById('models-dl-filename');
+  const dlPercent    = document.getElementById('models-dl-percent');
+  const dlBar        = document.getElementById('models-dl-bar');
+  const dlSize       = document.getElementById('models-dl-size');
+  progressArea.style.display = 'block';
+  dlFilename.textContent = filename;
+  dlPercent.textContent  = '0%';
+  dlBar.style.width      = '0%';
+  dlSize.textContent     = 'Połączenie z serwerem…';
+  document.querySelectorAll('.models-file-row [data-action="model-download"]').forEach(b => { b.disabled = true; });
+  try {
+    await window.api.downloadModelFile({ filename });
+    toast(`Pobrano: ${filename}`, 'success');
+    await refreshModelsLocal();
+  } catch (e) {
+    if (e.message !== 'Anulowano') toast(`Błąd pobierania ${filename}: ${e.message}`, 'error');
+  } finally {
+    _modelsDownloading = false;
+    progressArea.style.display = 'none';
+    document.querySelectorAll('.models-file-row [data-action="model-download"]').forEach(b => { b.disabled = false; });
+    renderModelsRemoteList();
+  }
+}
+
+function onModelDownloadProgress(data) {
+  const dlPercent = document.getElementById('models-dl-percent');
+  const dlBar     = document.getElementById('models-dl-bar');
+  const dlSize    = document.getElementById('models-dl-size');
+  if (!dlPercent) return;
+  const pct = Math.round((data.progress || 0) * 100);
+  dlPercent.textContent = pct + '%';
+  dlBar.style.width     = pct + '%';
+  if (data.total > 0) dlSize.textContent = `${formatFileSize(data.downloaded)} / ${formatFileSize(data.total)}`;
+}
+
+// Podpinamy zdarzenia modalu modeli
+(function attachModelsEvents() {
+  const btnModels       = document.getElementById('btn-models');
+  const modalsModal     = document.getElementById('models-modal');
+  const btnClose        = document.getElementById('models-close');
+  const btnCloseFooter  = document.getElementById('models-close-footer');
+  const btnOpenDir      = document.getElementById('btn-models-open-dir');
+  const btnCancel       = document.getElementById('btn-models-cancel');
+  const remoteList      = document.getElementById('models-remote-list');
+
+  if (btnModels)      btnModels.addEventListener('click', openModelsModal);
+  if (btnClose)       btnClose.addEventListener('click', closeModelsModal);
+  if (btnCloseFooter) btnCloseFooter.addEventListener('click', closeModelsModal);
+  if (btnOpenDir)     btnOpenDir.addEventListener('click', () => window.api.openModelsDir());
+  if (btnCancel)      btnCancel.addEventListener('click', async () => {
+    await window.api.cancelDownload();
+    toast('Pobieranie anulowane.', 'info');
+  });
+  if (modalsModal) {
+    modalsModal.querySelector('.modal-backdrop')?.addEventListener('click', closeModelsModal);
+  }
+  // Delegacja: przyciski pobierania w liście plików
+  if (remoteList) {
+    remoteList.addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-action="model-download"]');
+      if (!btn || btn.disabled) return;
+      const filename = btn.dataset.filename;
+      if (filename) await startModelDownload(filename);
+    });
+  }
+}());

@@ -17,35 +17,45 @@
   },
   "build": {
     "appId": "com.uki.audiobook.v3",
-    "productName": "AudiobookGenerator",
+    "productName": "Audiobook Generator",
+    "copyright": "Copyright © 2025 Uki",
     "files": [
       "main.js",
       "preload.js",
       "renderer.html",
       "renderer.css",
       "renderer.js",
-      "python_backend.py",
-      "server_pipeline.py",
       "phonetic_map.json"
     ],
     "extraResources": [
+      { "from": "s2_server.py",        "to": "s2_server.py" },
+      { "from": "python_backend.py",   "to": "python_backend.py" },
+      { "from": "server_pipeline.py",  "to": "server_pipeline.py" },
+      { "from": "_node_code",          "to": "_node_code" },
+      { "from": "phonetic_map.json",   "to": "phonetic_map.json" },
+      { "from": "phonetic_fixes.txt",  "to": "phonetic_fixes.txt" },
+      { "from": "requirements.txt",    "to": "requirements.txt" },
       {
-        "from": "backend-dist/python_backend.exe",
-        "to": "python_backend.exe"
-      },
-      {
-        "from": "phonetic_fixes.txt",
-        "to": "phonetic_fixes.txt"
-      },
-      {
-        "from": "./s2_server.py",
-        "to": "s2_server.py"
+        "from": "scripts/setup_python_installer.ps1",
+        "to":   "setup_python_installer.ps1"
       }
     ],
     "win": {
-      "target": "portable",
-      "icon": "icon.ico",
-      "artifactName": "AudiobookGenerator-${version}-portable.${ext}"
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "app_icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Audiobook Generator",
+      "menuCategory": "Audiobook Generator",
+      "include": "installer.nsh",
+      "runAfterFinish": false,
+      "language": "1045",
+      "artifactName": "AudiobookGenerator-${version}-setup.${ext}"
     }
   }
 }

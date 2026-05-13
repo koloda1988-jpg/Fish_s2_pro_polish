@@ -23,6 +23,18 @@ contextBridge.exposeInMainWorld('api', {
   // Gemini preparation flow
   prepareBookWithGemini: (payload) => ipcRenderer.invoke('gemini:prepareBook', payload),
 
+  // Models manager
+  getModelsStatus:   ()     => ipcRenderer.invoke('models:getLocalStatus'),
+  listRemoteModels:  ()     => ipcRenderer.invoke('models:listRemote'),
+  downloadModelFile: (opts) => ipcRenderer.invoke('models:startDownload', opts),
+  cancelDownload:    ()     => ipcRenderer.invoke('models:cancelDownload'),
+  openModelsDir:     ()     => ipcRenderer.invoke('models:openDir'),
+  onModelProgress: (cb) => {
+    const fn = (_evt, data) => cb(data);
+    ipcRenderer.on('models:progress', fn);
+    return () => ipcRenderer.removeListener('models:progress', fn);
+  },
+
   // events from python
   onEvent: (cb) => {
     const fn = (_evt, msg) => cb(msg);
