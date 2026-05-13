@@ -1,7 +1,7 @@
 const state = {
   bookPath: "",
   bookName: "",
-  workdir: document.getElementById("workdir")?.value.trim() || "C:\\Users\\kolod\\Documents\\Claude\\Projects\\Audiobook\\Audiobook (1)\\wersja 2",
+  workdir: document.getElementById("workdir")?.value.trim() || "",
   subdir: "Silos",
   audiobooksRoot: "",    // nadpisuje workdir\\Audiobooks gdy ustawione
   filesbooksRoot: "",    // nadpisuje workdir\\Files_books gdy ustawione

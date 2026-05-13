@@ -157,6 +157,13 @@ def load_phonetic_map():
 
 PHONETIC_MAP = load_phonetic_map()
 
+# Pre-kompiluj wzorce regex z hard_i_rules raz przy starcie — nie przy kazdym fragmencie
+_COMPILED_HARD_RULES: list[tuple[re.Pattern, str]] = [
+    (re.compile(rule["pattern"], flags=re.IGNORECASE), rule.get("replacement", ""))
+    for rule in (PHONETIC_MAP or {}).get("hard_i_rules", [])
+    if rule.get("pattern")
+]
+
 
 def normalize_punctuation_segment(segment):
     # Usuwamy znaki, ktore najczesciej myla model. Zostaja: . , ? ! oraz myslnik.
@@ -168,18 +175,15 @@ def normalize_punctuation_segment(segment):
     return segment.strip()
 
 
-def apply_hard_i_rules_segment(segment, rules):
-    for rule in rules:
-        pattern = rule.get("pattern")
-        repl = rule.get("replacement", "")
-        if not pattern:
-            continue
-
-        rgx = re.compile(pattern, flags=re.IGNORECASE)
-
-        def repl_fn(m):
-            return apply_case_like(m.group(0), repl)
-
+def apply_hard_i_rules_segment(segment, rules=None):
+    # Uzywamy pre-skompilowanych wzorcow zamiast kompilowac przy kazdym wywolaniu
+    compiled = _COMPILED_HARD_RULES if rules is None else [
+        (re.compile(r["pattern"], flags=re.IGNORECASE), r.get("replacement", ""))
+        for r in rules if r.get("pattern")
+    ]
+    for rgx, repl in compiled:
+        def repl_fn(m, _repl=repl):
+            return apply_case_like(m.group(0), _repl)
         segment = rgx.sub(repl_fn, segment)
     return segment
 
@@ -199,7 +203,6 @@ def apply_phonetic_corrections(text, options=None):
     use_dot_break = options.get("use_dot_break", False)
 
     word_map = (PHONETIC_MAP or {}).get("word_map", {})
-    hard_rules = (PHONETIC_MAP or {}).get("hard_i_rules", [])
 
     chunks = []
     for is_tag, chunk in split_by_tags(text):
@@ -221,7 +224,7 @@ def apply_phonetic_corrections(text, options=None):
         if apply_hard:
             for src, dst in word_map.items():
                 seg = _map_word_case_aware(seg, src, dst)
-            seg = apply_hard_i_rules_segment(seg, hard_rules)
+            seg = apply_hard_i_rules_segment(seg)
 
             if use_dot_break:
                 # Eksperymentalnie: rozbijamy si na s.i.
@@ -280,6 +283,14 @@ def wav_params(path):
 # ---------- PARSERY ----------
 
 def decode_best_text(data):
+    # Fast path: czysty UTF-8 bez replacement characters
+    try:
+        t = data.decode("utf-8")
+        if "\ufffd" not in t:
+            return t
+    except UnicodeDecodeError:
+        pass
+
     candidates = ["utf-8", "utf-8-sig", "cp1250", "iso-8859-2", "cp852", "cp1252", "latin1"]
     best_text = None
     best_score = -10**9
@@ -1276,6 +1287,22 @@ def handle(method, params):
                         "path": os.path.join(base, entry),
                     })
         return {"files": files}
+    if method == "delete_book":
+        # Usuwa caly folder ksiazki w Audiobooks/<book_name>
+        import shutil
+        audiobooks_dir = params.get("audiobooks_dir", "")
+        book_name = (params.get("book_name") or "").strip()
+        if not audiobooks_dir or not book_name:
+            return {"ok": False, "error": "Brak audiobooks_dir lub book_name"}
+        target = os.path.join(audiobooks_dir, book_name)
+        if not os.path.isdir(target):
+            return {"ok": False, "error": "Nie znaleziono ksiazki: " + book_name}
+        try:
+            shutil.rmtree(target)
+            return {"ok": True, "removed": target}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     if method == "list_voices":
         voices_dir = params.get("voices_dir", "")
         voices = []

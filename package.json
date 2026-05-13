@@ -1,0 +1,51 @@
+{
+  "name": "audiobook-generator",
+  "version": "3.1.0",
+  "description": "Audiobook Generator v3.1 — Electron + s2_server.py (Fish-Speech S2-Pro NF4)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:backend": "node scripts/build-python-backend.js",
+    "prebuild": "npm run build:backend",
+    "build": "electron-builder --win --x64"
+  },
+  "author": "Uki",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.uki.audiobook.v3",
+    "productName": "AudiobookGenerator",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.html",
+      "renderer.css",
+      "renderer.js",
+      "python_backend.py",
+      "server_pipeline.py",
+      "phonetic_map.json"
+    ],
+    "extraResources": [
+      {
+        "from": "backend-dist/python_backend.exe",
+        "to": "python_backend.exe"
+      },
+      {
+        "from": "phonetic_fixes.txt",
+        "to": "phonetic_fixes.txt"
+      },
+      {
+        "from": "./s2_server.py",
+        "to": "s2_server.py"
+      }
+    ],
+    "win": {
+      "target": "portable",
+      "icon": "icon.ico",
+      "artifactName": "AudiobookGenerator-${version}-portable.${ext}"
+    }
+  }
+}

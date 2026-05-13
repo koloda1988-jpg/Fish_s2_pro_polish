@@ -199,6 +199,12 @@ function startS2Server() {
 function pollHealth() {
   return new Promise((resolve, reject) => {
     const t0 = Date.now();
+    // Natychmiastowe odrzucenie Promise gdy s2Proc crashuje podczas oczekiwania
+    const onEarlyExit = (code, sig) => {
+      reject(new Error(`s2_server.py crashnął podczas ładowania modelu (kod=${code}, sig=${sig})`));
+    };
+    if (s2Proc) s2Proc.once('exit', onEarlyExit);
+    const cleanup = () => { if (s2Proc) s2Proc.removeListener('exit', onEarlyExit); };
     const tick = () => {
       const req = http.get(S2_HEALTH_URL, { timeout: 2000 }, (res) => {
         let body = '';
@@ -206,6 +212,7 @@ function pollHealth() {
         res.on('end', () => {
           if (res.statusCode === 200) {
             console.log('[s2] healthy:', body);
+            cleanup();
             resolve(body);
           } else {
             scheduleNext();
@@ -217,10 +224,12 @@ function pollHealth() {
     };
     const scheduleNext = () => {
       if (Date.now() - t0 > S2_HEALTH_TIMEOUT_MS) {
+        cleanup();
         return reject(new Error(
           `Timeout: s2_server.py nie odpowiedział w ${S2_HEALTH_TIMEOUT_MS / 1000}s`));
       }
       if (s2Proc === null) {
+        cleanup();
         return reject(new Error('s2_server.py zakończył pracę przed health-checkiem'));
       }
       setTimeout(tick, S2_HEALTH_POLL_MS);

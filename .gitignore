@@ -1,0 +1,29 @@
+# Node
+node_modules/
+package-lock.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Models (duże pliki binarne)
+models/
+
+# Dane użytkownika i wyjście
+Audiobooks/
+Files_books/
+Lectors/
+Silos/
+"Atlas chmur - David Mitchell"/
+
+# Pliki tymczasowe
+*.lnk
+backup.txt
+*.wav
+*.mp3
+
+# Logi
+*.log

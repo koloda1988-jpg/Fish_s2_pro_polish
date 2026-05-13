@@ -1,0 +1,9 @@
+# Python dependencies dla Audiobook Generator v3
+aiohttp>=3.9
+ebooklib>=0.18
+beautifulsoup4>=4.12
+pypdf>=4.0
+lxml>=5.0
+pyinstaller>=6.0
+yt-dlp>=2025.1.0
+faster-whisper>=1.0.3

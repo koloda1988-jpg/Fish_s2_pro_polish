@@ -1,0 +1,24 @@
+{
+  "word_map": {
+    "silos": "sy-los",
+    "sinus": "sy-nus"
+  },
+  "hard_i_rules": [
+    {
+      "pattern": "si(?=[aeiouyąęó])",
+      "replacement": "sy"
+    },
+    {
+      "pattern": "zi(?=[aeiouyąęó])",
+      "replacement": "z-i"
+    },
+    {
+      "pattern": "ci(?=[aeiouyąęó])",
+      "replacement": "c-i"
+    },
+    {
+      "pattern": "ni(?=[aeiouyąęó])",
+      "replacement": "n-i"
+    }
+  ]
+}

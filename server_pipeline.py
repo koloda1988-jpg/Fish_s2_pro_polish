@@ -351,7 +351,6 @@ def run_pipeline_sync(cfg, on_event, stop_flag=None):
         attempt = 0
         while retry_failed and not stop_flag.is_set() and attempt < max_retries:
             attempt += 1
-            retry_idxs = list(retry_failed)
             retry_tasks = [(i, t, s) for (i, t, s) in fragments if i in retry_failed]
             on_event("log", 0,
                      line="[retry #{}] {} fragmentow z TimeoutError, zmniejszam workers".format(

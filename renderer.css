@@ -920,7 +920,49 @@ input[type="checkbox"] {
 }
 
 .modal-window--book-settings {
-  width: min(500px, 95vw);
+  border: 2px solid #de7a28;
+  box-shadow: 0 0 0 1px rgba(222, 122, 40, 0.25), var(--shadow);
+  width: min(720px, 95vw);
+  max-width: 720px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-window--book-settings .modal-body {
+  padding: 18px 22px;
+  overflow-y: auto;
+}
+
+.modal-window--book-settings .field {
+  margin-bottom: 14px;
+}
+
+.modal-window--book-settings .field label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #8a8f99;
+  margin-bottom: 6px;
+}
+
+.modal-window--book-settings input[type="text"],
+.modal-window--book-settings textarea {
+  width: 100%;
+  padding: 8px 10px;
+  background: #1f2330;
+  color: #e8eaed;
+  border: 1px solid #2a3148;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.modal-window--book-settings textarea {
+  resize: vertical;
+  min-height: 60px;
 }
 
 .modal-window--voice {
@@ -1465,4 +1507,15 @@ textarea {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 260px;
+}
+
+/* ───── Sekcja Mapowanie postać → lektor (zawsze widoczna, nad listą fragmentów) ───── */
+.speaker-map-section {
+  border-top: 1px solid var(--line-soft, #2a3148);
+  padding-top: 10px !important;
+  padding-bottom: 10px !important;
+  background: linear-gradient(180deg, rgba(168,85,247,0.04) 0%, transparent 100%);
+}
+.speaker-map-section .speaker-voice-map-wrap {
+  min-height: 50px;
 }

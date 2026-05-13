@@ -1,0 +1,58 @@
+# Slownik fonetyczny dla Fish S2 Pro (polski TTS)
+# ================================================
+# Format: oryginal=>fonetyka
+# Linie zaczynajace sie od # to komentarze.
+# Dopasowanie - cale slowo, case-insensitive, zachowuje wielkosc oryginalu.
+#
+# Reguly:
+# - po lewej stronie => przed: dokladne slowo z ksiazki
+# - po prawej stronie => po: tak jak ma to przeczytac model
+# - mozesz pisac na znaki polskie - zostana zachowane
+
+# --- Anglojezyczne nazwy wlasne ---
+Hugh=>Hju
+Howey=>Hołi
+Holston=>Holston
+Donna=>Dona
+Donny=>Doni
+Donnę=>Donę
+Donnie=>Donie
+Donno=>Dono
+Clark=>Klark
+Clarka=>Klarka
+Clarkiem=>Klarkiem
+Marnes=>Marnes
+Marnesa=>Marnesa
+Jahns=>Jans
+Juliette=>Juliet
+Juliettę=>Juliet
+Jules=>Dżuls
+
+# --- Slowo "Silos" (model czyta "Silos" jako "Silos" miekko)
+# Wymuszamy "sy" - tworde
+Silos=>Sylos
+silos=>sylos
+Silosa=>Sylosa
+silosa=>sylosa
+Silosie=>Sylosie
+silosie=>sylosie
+Silosem=>Sylosem
+silosem=>sylosem
+Silosy=>Sylosy
+silosy=>sylosy
+Silosow=>Sylosów
+silosów=>sylosów
+
+# --- Polskie slowo "blade" (model czyta jak ang. "blade" = "blejd")
+# Rozdzielamy na sylaby zeby model nie skojarzyl z angielskim
+blade=>bla-de
+blada=>bla-da
+bladą=>bla-dą
+bladego=>bla-degó
+blady=>bla-dy
+bladych=>bla-dych
+bladymi=>bla-dymi
+
+# --- Inne potencjalnie problematyczne slowa angielskie ---
+# Dodawaj tu wlasne obserwacje po przesluchaniu
+# np: WORD=>FONETYKA
