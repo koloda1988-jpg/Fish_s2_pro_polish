@@ -184,6 +184,7 @@ const els = {
   btnBsmPickFilesbooks: document.getElementById("btn-bsm-pick-filesbooks"),
   btnBsmCancel:         document.getElementById("btn-bsm-cancel"),
   btnBsmSave:           document.getElementById("btn-bsm-save"),
+  btnBsmDelete:         document.getElementById("btn-bsm-delete-book"),
 };
 
 let editingIdx = null;
@@ -513,6 +514,44 @@ function attachBookSettingsModalEvents() {
   if (els.bsmClose)             els.bsmClose.addEventListener("click", closeBookSettingsModal);
   if (els.btnBsmCancel)         els.btnBsmCancel.addEventListener("click", closeBookSettingsModal);
   if (els.btnBsmSave)           els.btnBsmSave.addEventListener("click", saveBookSettings);
+
+  // Usun ksiazke (czerwony przycisk w stopce Ustawienia ksiazki)
+  if (els.btnBsmDelete) {
+    els.btnBsmDelete.addEventListener("click", async () => {
+      const bookName = (els.bsmBookName?.value || els.subdir?.value || "").trim();
+      if (!bookName) {
+        toast("Brak nazwy ksiazki do usuniecia.", "error");
+        return;
+      }
+      const confirmed = await customPrompt(
+        "Wpisz nazwe ksiazki '" + bookName + "' zeby potwierdzic usuniecie (nieodwracalne).",
+        ""
+      );
+      if (confirmed === null) return;
+      if (confirmed.trim() !== bookName) {
+        toast("Nazwa nie pasuje, anulowano.", "error");
+        return;
+      }
+      try {
+        const audiobooksDir = els.bsmAudiobooksPath?.value || (state.workdir + "\\Audiobooks");
+        const res = await window.api.py("delete_book", {
+          audiobooks_dir: audiobooksDir,
+          book_name: bookName,
+        });
+        if (res && res.ok) {
+          toast("Usunieto ksiazke: " + bookName, "success");
+          if (els.bookSettingsModal) els.bookSettingsModal.hidden = true;
+          if (typeof scanAudiobooksSubdirs === "function") {
+            await scanAudiobooksSubdirs();
+          }
+        } else {
+          toast("Blad usuwania: " + (res && res.error ? res.error : "nieznany"), "error");
+        }
+      } catch (err) {
+        toast("Blad: " + err.message, "error");
+      }
+    });
+  }
   if (els.bookSettingsModal)    els.bookSettingsModal.querySelector(".modal-backdrop")
                                   ?.addEventListener("click", closeBookSettingsModal);
   if (els.btnBsmPickAudiobooks) els.btnBsmPickAudiobooks.addEventListener("click", async () => {
