@@ -16,6 +16,7 @@ const state = {
   tagsEnabled: true,
   debugTtsInput: false,
   collapsedChapters: new Set(),
+  handMode: null,  // ustawiane podczas generacji w trybie ręcznym
 };
 
 // Pomocnicze ścieżki — respektują overrides z modalu ustawień
@@ -1272,6 +1273,7 @@ async function runSelectedServer(selectedIdx, wd, subdir) {
     try {
       const res = await window.api.py("server_run_queue", {
         url, endpoint, workdir: wd, subdir,
+        voice_label: group.label,
         ref_audio_path: group.refAudioPath,
         ref_text_file: group.refTextPath,
         fragments: group.fragments,
@@ -1424,6 +1426,9 @@ function stopRun() {
   if (!state.running) return;
   state.stopRequested = true;
   toast("Zatrzymam kolejke po biezacym fragmencie.", "info");
+  // Wyslij abort do s2_server — zapobiegnie uruchomieniu kolejnych fragmentow
+  const abortUrl = (els.serverUrl?.value?.trim() || "http://127.0.0.1:8080") + "/abort";
+  fetch(abortUrl, { method: "POST" }).catch(() => {});
 }
 
 // ─── Zaznacz N niegotowych ───────────────────────────────────────────────────
@@ -2116,6 +2121,11 @@ function attachBackendEvents() {
       return;
     }
     if (msg.event === "fragment:progress") {
+      // Tryb ręki — przekieruj do handlera hand mode jeśli aktywny
+      if (state.handMode) {
+        handleHandModeEvent(msg);
+        return;
+      }
       const idx = Number(msg.idx) - 1;
       if (idx >= 0 && idx < state.fragments.length) {
         state.fragments[idx].status = msg.status || state.fragments[idx].status;
@@ -2127,6 +2137,12 @@ function attachBackendEvents() {
         renderFragments();
       }
       return;
+    }
+    if (msg.event === "queue:done") {
+      if (state.handMode) {
+        handleHandModeEvent(msg);
+        return;
+      }
     }
     if (msg.event === "log") {
       const line = String(msg.line || "");
@@ -2416,10 +2432,22 @@ async function refreshBnBLocalStatus() {
       el.innerHTML = `<span style="color:#f59e0b;">⚠ Brak plików — kliknij Pobierz</span>
         <div style="font-size:11px;color:#5b6070;word-break:break-all;margin-top:2px;">${escapeHtml(dir)}</div>`;
     } else {
+      let serverBadge = '';
+      if (hasModel) {
+        try {
+          const ctrl = new AbortController();
+          const tid = setTimeout(() => ctrl.abort(), 2000);
+          const res = await fetch('http://127.0.0.1:8080/', { signal: ctrl.signal });
+          clearTimeout(tid);
+          if (res.ok) {
+            serverBadge = `<div class="model-alive-badge">🟢 Model załadowany · działa</div>`;
+          }
+        } catch (_) { /* serwer nieaktywny — nie pokazuj dodatkowego statusu */ }
+      }
       const badge = hasModel
         ? `<span style="color:#10b981;">✅ Model pobrany (${files.length} plików)</span>`
         : `<span style="color:#f59e0b;">⚠ Niekompletny — ${files.length} plik(ów)</span>`;
-      el.innerHTML = badge +
+      el.innerHTML = badge + serverBadge +
         `<div style="font-size:11px;color:#5b6070;word-break:break-all;margin-top:2px;">${escapeHtml(dir)}</div>`;
     }
   } catch (e) {
@@ -2486,11 +2514,37 @@ async function downloadBnBModel() {
 
 async function openModelsModal() {
   document.getElementById('models-modal').hidden = false;
+  checkModelServerStatus();
   await refreshModelsLocal();
   await refreshBnBLocalStatus();
   loadModelsRemote();
   if (_modelsProgressUnsub) _modelsProgressUnsub();
   _modelsProgressUnsub = window.api.onModelProgress(onModelDownloadProgress);
+}
+
+async function checkModelServerStatus() {
+  const dot   = document.getElementById('model-server-dot');
+  const label = document.getElementById('model-server-label');
+  if (!dot || !label) return;
+  const serverUrl = els.serverUrl?.value?.trim() || 'http://127.0.0.1:8080';
+  dot.className = 'server-dot server-dot--checking';
+  label.textContent = 'Sprawdzam silnik TTS…';
+  try {
+    const r = await fetch(serverUrl + '/', { signal: AbortSignal.timeout(4000) });
+    const data = await r.json();
+    if (data.status === 'ok') {
+      dot.className = 'server-dot server-dot--ok';
+      const mode = data.bnb_mode ? 'BnB-NF4' : 'fp16';
+      const dev  = (data.device || '').replace('cuda', 'CUDA').replace('cpu', 'CPU');
+      label.innerHTML = `✅ Model załadowany i działa &nbsp;<span style="color:#8a8f99;font-size:11px;">${escapeHtml(data.engine || '')} · ${mode} · ${escapeHtml(dev)}</span>`;
+    } else {
+      dot.className = 'server-dot server-dot--loading';
+      label.innerHTML = `⏳ Serwer uruchamia model… <span style="color:#8a8f99;font-size:11px;">(status: ${escapeHtml(data.status || '')})</span>`;
+    }
+  } catch (_) {
+    dot.className = 'server-dot server-dot--off';
+    label.innerHTML = '🔴 Serwer TTS nie działa &nbsp;<span style="color:#8a8f99;font-size:11px;">(uruchom aplikację i poczekaj na załadowanie modelu)</span>';
+  }
 }
 
 function closeModelsModal() {
@@ -2544,15 +2598,15 @@ function renderModelsRemoteList() {
   const localNames = new Set((_modelsLocalStatus.files || []).map(f => f.name));
   const rows = _modelsRemoteFiles.map(f => {
     const isLocal  = localNames.has(f.name);
-    const sizeStr  = formatFileSize(f.size);
+    const sizeStr  = f.size > 0 ? formatFileSize(f.size) : '';
     const dlBtn    = isLocal
       ? `<span style="color:#10b981;font-size:14px;">✅</span>`
       : `<button class="btn btn-primary btn-xs" style="min-width:86px;"
            data-action="model-download" data-filename="${escapeHtml(f.name)}">⬇ Pobierz</button>`;
     return `<div class="models-file-row" id="models-row-${CSS.escape(f.name)}">
       <div style="flex:1;min-width:0;">
-        <div style="font-size:13px;font-weight:500;word-break:break-all;">${escapeHtml(f.name)}</div>
-        <div style="font-size:11px;color:#5b6070;">${sizeStr}</div>
+        <div style="font-size:13px;font-weight:500;word-break:break-all;color:#c5d0e8;">${escapeHtml(f.name)}</div>
+        ${sizeStr ? `<div style="font-size:11px;color:#8a8f99;">${sizeStr}</div>` : ''}
       </div>
       <div style="flex-shrink:0;">${dlBtn}</div>
     </div>`;
@@ -2634,3 +2688,271 @@ function onModelDownloadProgress(data) {
     });
   }
 }());
+
+// ─── Tryb Ręki ───────────────────────────────────────────────────────────────
+
+function openHandModal() {
+  document.getElementById('hand-modal').removeAttribute('hidden');
+  loadHandVoices();
+  refreshHandFileList();
+}
+
+function closeHandModal() {
+  document.getElementById('hand-modal').setAttribute('hidden', '');
+}
+
+async function loadHandVoices() {
+  const select = document.getElementById('hand-voice-select');
+  if (!select) return;
+  select.innerHTML = '<option value="">— wczytywanie lektorów —</option>';
+  try {
+    const result = await window.api.py('list_voices', { voices_dir: voicesDir() });
+    const voices = result.voices || [];
+    if (!voices.length) {
+      select.innerHTML = '<option value="">— brak lektorów —</option>';
+      return;
+    }
+    select.innerHTML = voices.map(v =>
+      `<option value="${escapeHtml(v.name)}">${escapeHtml(v.name)}</option>`
+    ).join('');
+  } catch (_) {
+    select.innerHTML = '<option value="">— błąd wczytywania —</option>';
+  }
+}
+
+async function handleHandModeEvent(msg) {
+  const hm = state.handMode;
+  if (!hm) return;
+  const statusText = document.getElementById('hand-status-text');
+  const progressFill = document.getElementById('hand-progress-fill');
+  const outputInfo = document.getElementById('hand-output-info');
+
+  if (msg.event === 'fragment:progress') {
+    if (msg.status === 'processing') {
+      if (statusText) statusText.innerHTML = `<span class="hand-spinner"></span>Generuję fragment ${msg.idx} / ${hm.total}…`;
+    } else if (msg.status === 'success') {
+      hm.done++;
+      const pct = Math.round((hm.done / hm.total) * 100);
+      if (progressFill) progressFill.style.width = pct + '%';
+      if (statusText) statusText.innerHTML = `<span class="hand-spinner"></span>Gotowe: ${hm.done} / ${hm.total}`;
+      const wavPath = msg.wav || msg.wav_path || '';
+      if (outputInfo && wavPath) outputInfo.textContent = 'Ostatni plik: ' + wavPath;
+    } else if (msg.status === 'error') {
+      if (statusText) statusText.innerHTML = `⚠ Błąd fragment ${msg.idx}: ${msg.message || ''}`;
+    }
+  }
+
+  if (msg.event === 'queue:done') {
+    const doneCount = hm.done;
+    const doneTs    = hm.ts;
+    const doneVoice = hm.voice;
+    if (progressFill) progressFill.style.width = '100%';
+    const btn = document.getElementById('hand-generate');
+    const stopBtn = document.getElementById('hand-stop');
+    if (btn) btn.disabled = false;
+    if (stopBtn) stopBtn.style.display = 'none';
+    state.handMode = null;
+    refreshHandFileList();
+
+    // Scalanie fragmentów w jeden plik _full
+    if (statusText) statusText.innerHTML = `<span class="hand-spinner"></span>Scalanie ${doneCount} fragmentów…`;
+    if (outputInfo) outputInfo.textContent = '';
+    try {
+      const sanitize = s => (s || '').trim().replace(/ /g, '_').replace(/[\\/:\*?"<>|]/g, '');
+      const prefix = `${sanitize(doneVoice)}_hand_${doneTs}`;
+      const mres = await window.api.py('merge_audio', {
+        dir: handDir(), prefix, output_format: 'mp3',
+      });
+      if (mres.ok) {
+        const fname = mres.path.split(/[\\/]/).pop();
+        if (statusText) statusText.innerHTML = `✅ Scalono ${mres.count} fragmentów &rarr; <b>${escapeHtml(fname)}</b>`;
+        if (outputInfo) outputInfo.textContent = mres.path;
+      } else {
+        if (statusText) statusText.innerHTML = `✅ Wygenerowano ${doneCount} fragmentów (scalanie: ${escapeHtml(mres.error || '')})`.replace(/\(scalanie: \)/, '');
+      }
+    } catch (e) {
+      if (statusText) statusText.innerHTML = `✅ Wygenerowano ${doneCount} fragmentów`;
+    }
+    refreshHandFileList();
+  }
+}
+
+async function generateHandMode() {
+  const voiceName = document.getElementById('hand-voice-select')?.value;
+  const text = document.getElementById('hand-text')?.value.trim();
+
+  if (!voiceName) { toast('Wybierz lektora.', 'error'); return; }
+  if (!text)      { toast('Wpisz tekst do wygenerowania.', 'error'); return; }
+  if (!state.workdir) { toast('Ustaw katalog roboczy w głównym oknie.', 'error'); return; }
+
+  // Podziel tekst na fragmenty
+  const now = new Date();
+  const sessionTs = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
+
+  let fragments;
+  try {
+    const res = await window.api.py('split_text', { text, target_chars: 390 });
+    fragments = (res.fragments || [text]).map((t, i) => ({
+      idx: i + 1,
+      text: t,
+      frag_subdir: `Audiobooks\\hand`,
+    }));
+  } catch (_) {
+    fragments = [{ idx: 1, text, frag_subdir: `Audiobooks\\hand` }];
+  }
+
+  // Pokaż progress
+  const statusSection = document.getElementById('hand-status-section');
+  const statusText = document.getElementById('hand-status-text');
+  const progressFill = document.getElementById('hand-progress-fill');
+  const outputInfo = document.getElementById('hand-output-info');
+  if (statusSection) statusSection.style.display = '';
+  if (statusText) statusText.innerHTML = `<span class="hand-spinner"></span>Przygotowuję ${fragments.length} fragment(ów)…`;
+  if (progressFill) progressFill.style.width = '0%';
+  if (outputInfo) outputInfo.textContent = '';
+
+  const btn = document.getElementById('hand-generate');
+  const stopBtn = document.getElementById('hand-stop');
+  if (btn) btn.disabled = true;
+  if (stopBtn) stopBtn.style.display = '';
+
+  state.handMode = { total: fragments.length, done: 0, ts: sessionTs, voice: voiceName };
+
+  const lectors = voicesDir();
+  const serverUrl = els.serverUrl?.value?.trim() || 'http://127.0.0.1:8080';
+  const endpoint  = els.serverEndpoint?.value?.trim() || '/generate';
+
+  try {
+    const res = await window.api.py('server_run_queue', {
+      url:      serverUrl,
+      endpoint: endpoint,
+      workdir:  state.workdir,
+      subdir:   'hand',
+      voice_label: voiceName,
+      session_ts:  sessionTs,
+      ref_audio_path: `${lectors}\\${voiceName}.wav`,
+      ref_text_file:  `${lectors}\\${voiceName}.txt`,
+      fragments,
+      gpu_workers:        1,
+      timeout:            1800,
+      max_retries:        2,
+      temperature:        parseFloat(els.ttsTemperature?.value) || 0.8,
+      top_p:              parseFloat(els.ttsTopP?.value) || 0.8,
+      repetition_penalty: parseFloat(els.ttsRepPenalty?.value) || 1.1,
+      chunk_length:       parseInt(els.ttsChunkLength?.value, 10) || 200,
+      max_new_tokens:     parseInt(els.ttsMaxTokens?.value, 10) || 0,
+      output_format: 'mp3',
+    });
+    if (res && (res.error || res.ok === false)) {
+      toast('Błąd generacji: ' + (res.error || res.reason || 'nieznany błąd'), 'error');
+    }
+    // Odśwież listę plików po zakończeniu
+    refreshHandFileList();
+  } catch (e) {
+    toast('Błąd generacji: ' + e.message, 'error');
+  } finally {
+    if (state.handMode) {
+      // queue:done nie przyszedł — odblokuj przycisk
+      state.handMode = null;
+      if (btn) btn.disabled = false;
+      const stopBtn2 = document.getElementById('hand-stop');
+      if (stopBtn2) stopBtn2.style.display = 'none';
+    }
+  }
+}
+
+(function attachHandModeEvents() {
+  const btnOpen = document.getElementById('btn-hand-mode');
+  const modal   = document.getElementById('hand-modal');
+  if (!modal) return;
+
+  if (btnOpen)   btnOpen.addEventListener('click', openHandModal);
+  document.getElementById('hand-close')?.addEventListener('click', closeHandModal);
+  document.getElementById('hand-close-footer')?.addEventListener('click', closeHandModal);
+  document.getElementById('hand-generate')?.addEventListener('click', generateHandMode);
+  document.getElementById('hand-stop')?.addEventListener('click', async () => {
+    const serverUrl = els.serverUrl?.value?.trim() || 'http://127.0.0.1:8080';
+    try { await fetch(serverUrl + '/abort', { method: 'POST' }); } catch (_) {}
+    state.handMode = null;
+    const btn = document.getElementById('hand-generate');
+    const stopBtn = document.getElementById('hand-stop');
+    const statusText = document.getElementById('hand-status-text');
+    if (btn) btn.disabled = false;
+    if (stopBtn) stopBtn.style.display = 'none';
+    if (statusText) statusText.innerHTML = '⛔ Generacja przerwana.';
+  });
+  document.getElementById('hand-open-folder')?.addEventListener('click', () => {
+    const dir = handDir();
+    window.api.openInExplorer(dir);
+  });
+  modal.querySelector('.modal-backdrop')?.addEventListener('click', closeHandModal);
+
+  // delegacja: play/stop na liście plików
+  document.getElementById('hand-file-list')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.hand-play-btn');
+    if (!btn) return;
+    const path = btn.dataset.path;
+    if (!path) return;
+    playHandFile(path, btn);
+  });
+}());
+
+function handDir() {
+  return `${state.workdir}\\Audiobooks\\hand`;
+}
+
+let _handAudio = null;
+let _handPlayingBtn = null;
+
+function playHandFile(path, btn) {
+  // Stop previous if same file playing
+  if (_handAudio) {
+    _handAudio.pause();
+    _handAudio.currentTime = 0;
+    if (_handPlayingBtn) { _handPlayingBtn.textContent = '▶'; _handPlayingBtn = null; }
+    if (_handAudio.dataset.path === path) {
+      _handAudio = null;
+      return;
+    }
+  }
+  const audio = new Audio(toFileUrl(path));
+  audio.dataset = { path };
+  _handAudio = audio;
+  _handPlayingBtn = btn;
+  btn.textContent = '⏹';
+  audio.play().catch(() => { btn.textContent = '▶'; _handAudio = null; });
+  audio.addEventListener('ended', () => {
+    btn.textContent = '▶';
+    _handAudio = null;
+    _handPlayingBtn = null;
+  }, { once: true });
+}
+
+async function refreshHandFileList() {
+  const container = document.getElementById('hand-file-list');
+  if (!container) return;
+  if (!state.workdir) {
+    container.textContent = 'Ustaw katalog roboczy w głównym oknie.';
+    return;
+  }
+  try {
+    const res = await window.api.py('list_files', { path: handDir(), extensions: ['mp3', 'wav'] });
+    const files = (res?.files || []).sort();
+    if (!files.length) {
+      container.innerHTML = '<span style="color:#8a8f99;">Brak plików. Wygeneruj coś!</span>';
+      return;
+    }
+    container.innerHTML = files.map(f => {
+      const name = f.split(/[\\/]/).pop();
+      const fullPath = f.includes(':') ? f : `${handDir()}\\${f}`;
+      return `<div class="hand-file-row">
+        <button class="hand-play-btn" data-path="${escapeHtml(fullPath)}" title="Odtwórz / Zatrzymaj">▶</button>
+        <span class="hand-file-name" title="${escapeHtml(fullPath)}">${escapeHtml(name)}</span>
+        <button class="btn btn-ghost" style="font-size:11px;padding:2px 8px;flex-shrink:0;"
+          onclick="window.api.openWavFile('${escapeHtml(fullPath).replace(/'/g, "\\'")}')">📂</button>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    container.textContent = 'Błąd odczytu folderu: ' + e.message;
+  }
+}

@@ -67,8 +67,27 @@ DEFAULT_DISK_WORKERS = 1            # zapis WAV-ow (1 wystarczy)
 DEFAULT_MAX_RETRIES = 2             # retry przy TimeoutError
 
 
-def output_filename(index, subdir=DEFAULT_SUBDIR, ext="wav"):
-    name = "maciej_file_test.{}".format(ext) if index == 1 else "maciej_file_test{}.{}".format(index, ext)
+def _sanitize_part(s):
+    """Usuwa znaki niedozwolone w nazwach plikow Windows i zamienia spacje na '_'."""
+    if not s:
+        return ""
+    s = s.strip().replace(" ", "_")
+    s = re.sub(r'[\\/:*?"<>|]', "", s)
+    return s or ""
+
+
+def output_filename(index, subdir=DEFAULT_SUBDIR, ext="wav", voice_label="", session_ts=""):
+    """Buduje nazwe pliku: {lektor}_{ksiazka}_{rozdzial}_{ts}_{idx:04d}.{ext}"""
+    parts = re.split(r'[\\/]', (subdir or "").strip("\\/"))
+    if parts and parts[0].lower() == "audiobooks":
+        parts = parts[1:]
+    book    = _sanitize_part(parts[0]) if len(parts) > 0 else ""
+    chapter = _sanitize_part(parts[1]) if len(parts) > 1 else ""
+    voice   = _sanitize_part(voice_label)
+    ts      = _sanitize_part(session_ts)
+    segments = [s for s in [voice, book, chapter, ts] if s]
+    prefix = "_".join(segments) if segments else "fragment"
+    name = "{}_{:04d}.{}".format(prefix, index, ext)
     if subdir:
         return "{}\\{}".format(subdir.rstrip("\\/"), name)
     return name
@@ -154,7 +173,9 @@ def _prebuild_request(idx, fragment, phonetic_map, srv_cfg, frag_subdir=None):
     if out_fmt not in ("wav", "mp3"):
         out_fmt = "wav"
     text = apply_phonetic(fragment, phonetic_map) if phonetic_map else fragment
-    expected = os.path.join(wd, output_filename(idx, sub, ext=out_fmt))
+    voice_label = srv_cfg.get("voice_label", "")
+    session_ts  = srv_cfg.get("session_ts", "")
+    expected = os.path.join(wd, output_filename(idx, sub, ext=out_fmt, voice_label=voice_label, session_ts=session_ts))
     os.makedirs(os.path.dirname(expected), exist_ok=True)
 
     fields = {"text": text}

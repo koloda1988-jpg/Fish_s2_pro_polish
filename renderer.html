@@ -27,6 +27,9 @@
       <button class="btn btn-ghost" id="btn-reload-app" title="Odśwież interfejs (F5) — bez restartu serwera TTS">
         🔄 Odśwież
       </button>
+      <button class="btn btn-secondary" id="btn-hand-mode" title="Tryb ręki — szybka generacja dowolnego tekstu">
+        ✍ Tryb Ręki
+      </button>
       <button class="btn btn-secondary" id="btn-models" title="Pobierz i zarządzaj modelami TTS">
         📦 Modele
       </button>
@@ -632,6 +635,58 @@
     </div>
   </div>
 
+  <!-- Modal: Tryb Ręki -->
+  <div class="modal" id="hand-modal" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-window modal-window--hand">
+      <div class="modal-header">
+        <h3>✍ Tryb Ręki</h3>
+        <button class="btn btn-ghost btn-icon" id="hand-close">×</button>
+      </div>
+      <div class="modal-body hand-modal-body">
+
+        <div class="hand-section">
+          <div class="hand-section-title">Lektor</div>
+          <select id="hand-voice-select" class="hand-select">
+            <option value="">— wczytywanie lektorów —</option>
+          </select>
+        </div>
+
+        <div class="hand-section">
+          <div class="hand-section-title">Tekst do wygenerowania</div>
+          <textarea id="hand-text" class="hand-textarea"
+            placeholder="Wpisz dowolny tekst, może być długi — zostanie automatycznie podzielony na fragmenty..."></textarea>
+        </div>
+
+        <div class="hand-section" id="hand-status-section" style="display:none;">
+          <div class="hand-section-title">Postęp generacji</div>
+          <div id="hand-status-text" style="font-size:13px;color:#c5d0e8;margin-bottom:8px;">Czekam…</div>
+          <div class="hand-progress-track">
+            <div class="hand-progress-fill" id="hand-progress-fill" style="width:0%"></div>
+          </div>
+          <div id="hand-output-info" style="font-size:11px;color:#8a8f99;margin-top:6px;"></div>
+        </div>
+
+        <div class="hand-section">
+          <div class="hand-section-title" style="display:flex;justify-content:space-between;align-items:center;">
+            <span>📂 Wygenerowane pliki (hand)</span>
+            <button class="btn btn-ghost" id="hand-open-folder" title="Otwórz folder w eksploratorze"
+              style="font-size:11px;padding:2px 10px;">
+              📁 Otwórz folder
+            </button>
+          </div>
+          <div id="hand-file-list" style="font-size:13px;color:#8a8f99;">Brak plików. Wygeneruj coś!</div>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary hand-btn-generate" id="hand-generate">🎙 Generuj</button>
+        <button class="btn hand-btn-stop" id="hand-stop" style="display:none;">⏹ Stop</button>
+        <button class="btn btn-secondary" id="hand-close-footer">Zamknij</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal: Models Manager -->
   <div class="modal" id="models-modal" hidden>
     <div class="modal-backdrop"></div>
@@ -641,6 +696,12 @@
         <button class="btn btn-ghost btn-icon" id="models-close">×</button>
       </div>
       <div class="modal-body models-modal-body">
+
+        <!-- Status serwera TTS -->
+        <div id="model-server-status" class="models-server-status">
+          <span id="model-server-dot" class="server-dot server-dot--checking"></span>
+          <span id="model-server-label">Sprawdzam silnik TTS…</span>
+        </div>
 
         <!-- s2-pro-BnB-4Bits (zalecany) -->
         <div class="models-section" id="bnb-model-section">
@@ -661,7 +722,7 @@
 
         <!-- Status lokalny -->
         <div class="models-section">
-          <div class="models-section-title">📁 Zainstalowane (fish-speech-1.5)</div>
+          <div class="models-section-title">📁 Zainstalowane (Fish Speech S2-Pro)</div>
           <div id="models-local-list" style="font-size:13px;">Sprawdzam…</div>
           <button class="btn btn-ghost" id="btn-models-open-dir"
             style="margin-top:10px;font-size:12px;padding:4px 12px;">
@@ -669,11 +730,11 @@
           </button>
         </div>
 
-        <!-- Pobieranie z HuggingFace -->
-        <div class="models-section">
+        <!-- Pobieranie z HuggingFace (ukryte — pliki BnB mają inne nazwy) -->
+        <div class="models-section" hidden>
           <div class="models-section-title" style="display:flex;justify-content:space-between;align-items:center;">
-            <span>⬇ Pobierz z HuggingFace</span>
-            <span style="font-size:11px;font-weight:400;color:#8a8f99;">fishaudio/fish-speech-1.5</span>
+            <span>⬇ Pobierz pliki bazowe</span>
+            <span style="font-size:11px;font-weight:400;color:#8a8f99;">fishaudio/fish-speech-s2-pro</span>
           </div>
           <div id="models-remote-list">
             <div style="color:#8a8f99;font-size:13px;">Wczytywanie listy…</div>

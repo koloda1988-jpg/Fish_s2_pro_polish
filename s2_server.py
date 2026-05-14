@@ -135,6 +135,7 @@ DTYPE_MAP = {
 _engine = None             # TTSInferenceEngine
 _engine_lock = threading.Lock()  # serializacja inference (GPU robi po jednym)
 _ref_cache: dict[str, bytes] = {}  # hash -> ref_bytes (tylko zeby nie trzymac duplikatow w pamieci)
+_abort_requested = False   # ustawiane przez POST /abort; zerowane po uzyciu
 
 
 def _resolve_decoder(model_dir: Path) -> Path:
@@ -382,6 +383,15 @@ def _parse_optional_int(value: Optional[str], fallback: int) -> int:
         return fallback
 
 
+@app.post("/abort")
+async def abort_generation():
+    """Przerywa kolejne generowanie (nie biezace). Wywolywane przez przycisk STOP w UI."""
+    global _abort_requested
+    _abort_requested = True
+    log.info("Abort requested — nastepna generacja zostanie odrzucona.")
+    return {"status": "abort_queued"}
+
+
 @app.post("/generate")
 async def generate(
     text: str = Form(...),
@@ -401,6 +411,10 @@ async def generate(
     if len(text) > MAX_TEXT_CHARS:
         raise HTTPException(400, f"Tekst zbyt dlugi ({len(text)} > {MAX_TEXT_CHARS} znakow). "
                                   "Podziel fragment na krotsze czesci.")
+    global _abort_requested
+    if _abort_requested:
+        _abort_requested = False
+        raise HTTPException(499, "Generacja przerwana przez uzytkownika.")
     if _engine is None:
         raise HTTPException(503, "Engine jeszcze sie laduje, sprobuj ponownie za chwile.")
 

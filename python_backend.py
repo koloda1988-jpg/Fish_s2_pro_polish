@@ -1170,6 +1170,8 @@ def handle(method, params):
             "chunk_length":       int(params.get("chunk_length", 200)),
             "max_new_tokens":     int(params.get("max_new_tokens", 0)),
             "max_retries":        int(params.get("max_retries", 2)),
+            "voice_label":        str(params.get("voice_label", "")),
+            "session_ts":         str(params.get("session_ts", "")),
         }
         os.makedirs(os.path.join(cfg["workdir"], cfg["subdir"]), exist_ok=True)
         def on_event(typ, idx, **data):
@@ -1186,6 +1188,26 @@ def handle(method, params):
             elif typ == "log":
                 emit_event("log", line=data.get("line", ""))
         return server_pipeline.run_pipeline_sync(cfg, on_event)
+    if method == "merge_audio":
+        import glob
+        from pydub import AudioSegment
+        directory     = params.get("dir", "")
+        prefix        = params.get("prefix", "")
+        output_format = (params.get("output_format") or "mp3").lower()
+        if not directory or not prefix:
+            return {"ok": False, "error": "Brak dir lub prefix"}
+        pattern = os.path.join(directory, "{}_{}.{}".format(prefix, "*", output_format))
+        files = sorted(glob.glob(pattern))
+        # Wyklucz plik _full jesli juz istnieje
+        files = [f for f in files if not f.replace("\\", "/").split("/")[-1].startswith(prefix + "_full")]
+        if not files:
+            return {"ok": False, "error": "Brak plikow do scalenia", "pattern": pattern}
+        combined = AudioSegment.empty()
+        for f in files:
+            combined += AudioSegment.from_file(f, format=output_format)
+        output_path = os.path.join(directory, "{}_full.{}".format(prefix, output_format))
+        combined.export(output_path, format=output_format, bitrate="192k")
+        return {"ok": True, "path": output_path, "count": len(files)}
     if method == "load_book":
         chapters = load_book(params["path"])
         chapters_with_counts = []
