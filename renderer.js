@@ -2789,9 +2789,12 @@ async function generateHandMode() {
   const now = new Date();
   const sessionTs = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
 
+  const chunkSec   = Math.max(5, Math.min(120, parseInt(document.getElementById('hand-chunk-seconds')?.value, 10) || 20));
+  const targetChars = chunkSec * 13;
+
   let fragments;
   try {
-    const res = await window.api.py('split_text', { text, target_chars: 390 });
+    const res = await window.api.py('split_text', { text, target_chars: targetChars });
     fragments = (res.fragments || [text]).map((t, i) => ({
       idx: i + 1,
       text: t,
@@ -2886,6 +2889,28 @@ async function generateHandMode() {
     window.api.openInExplorer(dir);
   });
   modal.querySelector('.modal-backdrop')?.addEventListener('click', closeHandModal);
+
+  // Slider <-> number input sync + hint
+  const slider  = document.getElementById('hand-chunk-slider');
+  const numInput = document.getElementById('hand-chunk-seconds');
+  const hint    = document.getElementById('hand-chunk-hint');
+  function updateChunkHint(sec) {
+    const chars = Math.round(sec * 13);
+    if (hint) hint.textContent = `≈ ${chars} znaków`;
+  }
+  if (slider && numInput) {
+    slider.addEventListener('input', () => {
+      numInput.value = slider.value;
+      updateChunkHint(parseInt(slider.value, 10));
+    });
+    numInput.addEventListener('input', () => {
+      let v = Math.max(5, Math.min(120, parseInt(numInput.value, 10) || 20));
+      slider.value = v;
+      numInput.value = v;
+      updateChunkHint(v);
+    });
+    updateChunkHint(parseInt(slider.value, 10));
+  }
 
   // delegacja: play/stop na liście plików
   document.getElementById('hand-file-list')?.addEventListener('click', (e) => {

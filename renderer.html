@@ -658,6 +658,27 @@
             placeholder="Wpisz dowolny tekst, może być długi — zostanie automatycznie podzielony na fragmenty..."></textarea>
         </div>
 
+        <div class="hand-section">
+          <div class="hand-section-title" style="display:flex;justify-content:space-between;align-items:center;">
+            <span>⏱ Długość fragmentu</span>
+            <span id="hand-chunk-hint" style="font-size:11px;color:#8a8f99;font-weight:400;">≈ 260 znaków</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <input type="range" id="hand-chunk-slider" min="5" max="120" step="5" value="20"
+              style="flex:1;accent-color:#a855f7;cursor:pointer;">
+            <input type="number" id="hand-chunk-seconds" min="5" max="120" step="5" value="20"
+              style="width:64px;background:#0d1117;border:1px solid #2a3148;border-radius:6px;
+                     color:#c5d0e8;padding:4px 8px;font-size:13px;text-align:center;">
+            <span style="font-size:12px;color:#8a8f99;white-space:nowrap;">sek.</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:#5b6070;margin-top:4px;">
+            <span>5s (krótkie)</span>
+            <span style="color:#10b981;font-weight:600;">✓ 20s zalecane</span>
+            <span>60s max</span>
+            <span>120s</span>
+          </div>
+        </div>
+
         <div class="hand-section" id="hand-status-section" style="display:none;">
           <div class="hand-section-title">Postęp generacji</div>
           <div id="hand-status-text" style="font-size:13px;color:#c5d0e8;margin-bottom:8px;">Czekam…</div>
