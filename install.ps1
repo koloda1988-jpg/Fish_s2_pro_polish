@@ -1,19 +1,5 @@
-# install.ps1 — Jednorazowy setup Audiobook Generator
-#
-# Co robi:
-#   1) Sprawdza wymagania (Node.js, Python 3.10+, npm)
-#   2) Instaluje zaleznosci npm (Electron)
-#   3) Tworzy lokalne venv Python w katalogu projektu (.\venv\)
-#   4) Instaluje zaleznosci Python (requirements.txt + torch + fish_speech)
-#   5) Sprawdza/tworzy katalogi: Audiobooks, Files_books, Lectors
-#   6) Sprawdza model s2-pro i pokazuje instrukcje jezeli brakuje
-#
-# UZYCIE:
-#   .\install.ps1
-#   .\install.ps1 -ModelPath "D:\modele\s2-pro-fp8"  # jezeli masz model gdzie indziej
-
 param(
-    [string]$ModelPath = ""   # opcjonalna sciezka do gotowego modelu s2-pro
+    [string]$ModelPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,167 +8,183 @@ $Root = $PSScriptRoot
 function Write-Step($n, $msg) {
     Write-Host "`n[$n] $msg" -ForegroundColor Cyan
 }
-function Write-OK($msg)   { Write-Host "    OK  $msg" -ForegroundColor Green }
-function Write-WARN($msg) { Write-Host "  WARN  $msg" -ForegroundColor Yellow }
-function Write-FAIL($msg) { Write-Host "  FAIL  $msg" -ForegroundColor Red }
+
+function Write-OK($msg) {
+    Write-Host "    OK  $msg" -ForegroundColor Green
+}
+
+function Write-WarnMsg($msg) {
+    Write-Host "  WARN  $msg" -ForegroundColor Yellow
+}
+
+function Write-Fail($msg) {
+    Write-Host "  FAIL  $msg" -ForegroundColor Red
+}
+
+function Test-CommandSucceeded($code, $message) {
+    if ($code -ne 0) {
+        Write-Fail $message
+        exit 1
+    }
+}
+
+function Find-Python310Plus() {
+    foreach ($candidate in @("python", "python3", "py")) {
+        try {
+            $versionOutput = & $candidate --version 2>&1
+            if ($versionOutput -match "Python (\d+)\.(\d+)") {
+                $major = [int]$Matches[1]
+                $minor = [int]$Matches[2]
+                if ($major -gt 3 -or ($major -eq 3 -and $minor -ge 10)) {
+                    return (Get-Command $candidate).Source
+                }
+            }
+        } catch {
+        }
+    }
+
+    return $null
+}
 
 Write-Host ""
 Write-Host "=====================================================" -ForegroundColor Magenta
-Write-Host "  Audiobook Generator — instalator" -ForegroundColor Magenta
-Write-Host "  Katalog projektu: $Root" -ForegroundColor DarkGray
+Write-Host "  Audiobook Generator - installer" -ForegroundColor Magenta
+Write-Host "  Project dir: $Root" -ForegroundColor DarkGray
 Write-Host "=====================================================" -ForegroundColor Magenta
 
-# ─── 1. Node.js ─────────────────────────────────────────────────────────────
-Write-Step 1 "Sprawdzam Node.js..."
+Write-Step 1 "Checking Node.js..."
 try {
     $nodeVer = node --version 2>&1
     Write-OK "Node.js $nodeVer"
 } catch {
-    Write-FAIL "Nie znaleziono Node.js. Pobierz z https://nodejs.org/ (wersja 18+)"
+    Write-Fail "Node.js not found. Install Node.js 18+ from https://nodejs.org/"
     exit 1
 }
 
-# ─── 2. Python ──────────────────────────────────────────────────────────────
-Write-Step 2 "Sprawdzam Python..."
-$pythonExe = $null
-foreach ($candidate in @("python", "python3", "py")) {
-    try {
-        $ver = & $candidate --version 2>&1
-        if ($ver -match "Python (\d+)\.(\d+)") {
-            $major = [int]$Matches[1]; $minor = [int]$Matches[2]
-            if ($major -ge 3 -and $minor -ge 10) {
-                $pythonExe = (Get-Command $candidate).Source
-                Write-OK "$pythonExe ($ver)"
-                break
-            }
-        }
-    } catch {}
-}
+Write-Step 2 "Checking Python 3.10+..."
+$pythonExe = Find-Python310Plus
 if (-not $pythonExe) {
-    Write-FAIL "Nie znaleziono Python 3.10+. Pobierz z https://www.python.org/"
+    Write-Fail "Python 3.10+ not found. Install Python and add it to PATH."
     exit 1
 }
+$pythonVer = & $pythonExe --version 2>&1
+Write-OK "$pythonExe ($pythonVer)"
 
-# ─── 3. npm install ─────────────────────────────────────────────────────────
-Write-Step 3 "Instaluje zaleznosci npm (Electron)..."
+$diagExe = Join-Path $Root "diagnostic.exe"
+if (Test-Path $diagExe) {
+    Write-Host "    Running diagnostic.exe (pre-check)..." -ForegroundColor DarkGray
+    & $diagExe -ProjectRoot "$Root" -RequirementsFile "requirements.txt" | Out-Null
+}
+
+Write-Step 3 "Installing npm dependencies..."
 Push-Location $Root
 if (-not (Test-Path "node_modules")) {
     npm install
-    if ($LASTEXITCODE -ne 0) { Write-FAIL "npm install nieudane"; exit 1 }
-    Write-OK "node_modules gotowe"
+    Test-CommandSucceeded $LASTEXITCODE "npm install failed"
+    Write-OK "node_modules ready"
 } else {
-    Write-OK "node_modules juz istnieje — pomijam"
+    Write-OK "node_modules already exists - skipping"
 }
 Pop-Location
 
-# ─── 4. Lokalne venv Python ─────────────────────────────────────────────────
-Write-Step 4 "Tworze lokalne venv Python w .\venv\ ..."
-$venvDir    = Join-Path $Root "venv"
+Write-Step 4 "Creating local venv in .\\venv..."
+$venvDir = Join-Path $Root "venv"
 $venvPython = Join-Path $venvDir "Scripts\python.exe"
 
 if (-not (Test-Path $venvPython)) {
     & $pythonExe -m venv $venvDir
-    if ($LASTEXITCODE -ne 0) { Write-FAIL "Tworzenie venv nieudane"; exit 1 }
-    Write-OK "venv utworzone: $venvDir"
+    Test-CommandSucceeded $LASTEXITCODE "Failed to create local venv"
+    Write-OK "venv created: $venvDir"
 } else {
-    Write-OK "venv juz istnieje — pomijam tworzenie"
+    Write-OK "venv already exists - skipping"
 }
 
-# pip upgrade
 & $venvPython -m pip install --upgrade pip --quiet
+Test-CommandSucceeded $LASTEXITCODE "pip upgrade failed"
 
-# ─── 5. Zaleznosci Python ───────────────────────────────────────────────────
-Write-Step 5 "Instaluje zaleznosci Python (requirements.txt)..."
+Write-Step 5 "Installing Python dependencies..."
 $reqFile = Join-Path $Root "requirements.txt"
 if (Test-Path $reqFile) {
     & $venvPython -m pip install -r $reqFile --quiet
-    if ($LASTEXITCODE -ne 0) { Write-FAIL "pip install requirements.txt nieudane"; exit 1 }
-    Write-OK "requirements.txt zainstalowane"
+    Test-CommandSucceeded $LASTEXITCODE "pip install -r requirements.txt failed"
+    Write-OK "requirements.txt installed"
 }
 
-# PyTorch (CUDA 12.1) — jezeli nie ma juz torch w venv
-Write-Host "    Sprawdzam torch..." -ForegroundColor DarkGray
-$torchCheck = & $venvPython -c "import torch; print(torch.__version__)" 2>&1
-if ($torchCheck -notmatch "^\d") {
-    Write-Host "    Instaluje PyTorch (CUDA 12.1)..." -ForegroundColor DarkGray
-    & $venvPython -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 --quiet
-    if ($LASTEXITCODE -ne 0) { Write-WARN "Instalacja torch nieudana — sprawdz polaczenie i wersje CUDA" }
-    else { Write-OK "torch zainstalowany" }
-} else {
-    Write-OK "torch $torchCheck juz zainstalowany"
-}
+$diagScript = Join-Path $Root "diagnostic.ps1"
+if (Test-Path $diagScript) {
+    Write-Host "    Running diagnostic.ps1 (post-install check)..." -ForegroundColor DarkGray
+    $diagJson = & $diagScript -ProjectRoot "$Root" -PythonExe "$venvPython" -RequirementsFile "$reqFile" -Json 2>$null
+    $diag = $null
+    try {
+        $diag = $diagJson | ConvertFrom-Json
+    } catch {
+        $diag = $null
+    }
 
-# Fish Speech zaleznosci TTS
-Write-Host "    Sprawdzam zaleznosci fish_speech..." -ForegroundColor DarkGray
-$fishDeps = @("fastapi", "uvicorn", "soundfile", "numpy", "pydub", "bitsandbytes")
-$missingFish = @()
-foreach ($pkg in $fishDeps) {
-    $check = & $venvPython -c "import $($pkg.Replace('-','_'))" 2>&1
-    if ($LASTEXITCODE -ne 0) { $missingFish += $pkg }
-}
-if ($missingFish.Count -gt 0) {
-    Write-Host "    Instaluje: $($missingFish -join ', ')..." -ForegroundColor DarkGray
-    & $venvPython -m pip install $missingFish --quiet
-    if ($LASTEXITCODE -ne 0) { Write-WARN "Niektore pakiety fish_speech nie zostaly zainstalowane" }
-    else { Write-OK "Zaleznosci fish_speech zainstalowane" }
-} else {
-    Write-OK "Zaleznosci fish_speech OK"
-}
-
-# ─── 6. Katalogi projektowe ─────────────────────────────────────────────────
-Write-Step 6 "Tworze katalogi projektowe..."
-foreach ($dir in @("Audiobooks", "Files_books", "Lectors")) {
-    $p = Join-Path $Root $dir
-    if (-not (Test-Path $p)) {
-        New-Item -ItemType Directory -Path $p | Out-Null
-        Write-OK "Utworzono: $dir\"
+    if ($diag -and $diag.missingPackages -and $diag.missingPackages.Count -gt 0) {
+        $missing = @($diag.missingPackages)
+        Write-WarnMsg "Missing packages after initial install: $($missing -join ', ')"
+        Write-Host "    Installing missing packages from requirements..." -ForegroundColor DarkGray
+        & $venvPython -m pip install $missing --quiet
+        if ($LASTEXITCODE -eq 0) {
+            Write-OK "Missing packages installed"
+        } else {
+            Write-WarnMsg "Some missing packages could not be installed automatically"
+        }
     } else {
-        Write-OK "Istnieje:  $dir\"
+        Write-OK "diagnostic: requirements coverage OK"
     }
 }
 
-# ─── 7. Model s2-pro ────────────────────────────────────────────────────────
-Write-Step 7 "Sprawdzam model s2-pro..."
-$modelDir = Join-Path $Root "models\s2-pro"
+Write-Step 6 "Creating project directories..."
+foreach ($dir in @("Audiobooks", "Files_books", "Lectors")) {
+    $path = Join-Path $Root $dir
+    if (-not (Test-Path $path)) {
+        New-Item -ItemType Directory -Path $path | Out-Null
+        Write-OK "Created: $dir\\"
+    } else {
+        Write-OK "Exists: $dir\\"
+    }
+}
 
-if (-not (Test-Path (Join-Path $Root "models"))) {
-    New-Item -ItemType Directory -Path (Join-Path $Root "models") | Out-Null
+Write-Step 7 "Checking s2-pro model..."
+$modelsRoot = Join-Path $Root "models"
+$modelDir = Join-Path $modelsRoot "s2-pro"
+
+if (-not (Test-Path $modelsRoot)) {
+    New-Item -ItemType Directory -Path $modelsRoot | Out-Null
 }
 
 if ($ModelPath -and (Test-Path $ModelPath)) {
-    # Uzytkownik podal sciezke — tworz junction
-    if (Test-Path $modelDir) { Remove-Item $modelDir -Force -Recurse }
+    if (Test-Path $modelDir) {
+        Remove-Item $modelDir -Force -Recurse
+    }
     cmd /c mklink /J "$modelDir" "$ModelPath" | Out-Null
-    Write-OK "Junction models\s2-pro -> $ModelPath"
-} elseif ((Test-Path $modelDir) -and (Get-ChildItem $modelDir -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0) {
-    Write-OK "models\s2-pro istnieje i ma pliki"
+    Write-OK "Junction models\\s2-pro -> $ModelPath"
+} elseif ((Test-Path $modelDir) -and ((Get-ChildItem $modelDir -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)) {
+    Write-OK "models\\s2-pro exists and has files"
 } else {
-    # Brak modelu — pokaz instrukcje
     if (-not (Test-Path $modelDir)) {
         New-Item -ItemType Directory -Path $modelDir | Out-Null
     }
-    Write-WARN "Brak modelu w models\s2-pro\"
+    Write-WarnMsg "No model in models\\s2-pro\\"
     Write-Host ""
-    Write-Host "  Pobierz model Fish Audio S2-Pro FP8 z Hugging Face:" -ForegroundColor Yellow
+    Write-Host "  Download Fish Audio S2-Pro from Hugging Face:" -ForegroundColor Yellow
     Write-Host "  https://huggingface.co/fishaudio/fish-speech-1.5" -ForegroundColor White
     Write-Host ""
-    Write-Host "  Nastepnie:" -ForegroundColor Yellow
-    Write-Host "  a) Skopiuj pliki modelu do:  $modelDir" -ForegroundColor White
-    Write-Host "  b) Lub ponow instalacje z parametrem:" -ForegroundColor White
-    Write-Host "     .\install.ps1 -ModelPath 'D:\twoja\sciezka\s2-pro'" -ForegroundColor White
-    Write-Host ""
-    Write-Host "  Lub jezeli uzywasz Stability Matrix (ComfyUI node fishaudio):" -ForegroundColor Yellow
-    Write-Host "  Uruchom:  .\install.ps1 -ModelPath 'E:\StabilityMatrix\...\s2-pro-fp8'" -ForegroundColor White
+    Write-Host "  Then either:" -ForegroundColor Yellow
+    Write-Host "  a) copy model files to: $modelDir" -ForegroundColor White
+    Write-Host "  b) rerun with ModelPath:" -ForegroundColor White
+    Write-Host "     .\\install.ps1 -ModelPath 'D:\\models\\s2-pro-fp8'" -ForegroundColor White
 }
 
-# ─── Podsumowanie ───────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "=====================================================" -ForegroundColor Magenta
-Write-Host "  Instalacja zakonczona!" -ForegroundColor Green
+Write-Host "  Installation complete" -ForegroundColor Green
 Write-Host ""
-Write-Host "  Aby uruchomiec aplikacje:" -ForegroundColor White
+Write-Host "  Run app with:" -ForegroundColor White
 Write-Host "    npm start" -ForegroundColor Cyan
-Write-Host "  lub kliknij:" -ForegroundColor White
+Write-Host "  or:" -ForegroundColor White
 Write-Host "    start_app.bat" -ForegroundColor Cyan
 Write-Host "=====================================================" -ForegroundColor Magenta
 Write-Host ""

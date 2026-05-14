@@ -1,4 +1,9 @@
 # Python dependencies dla Audiobook Generator v3
+# Uwaga: instalator korzysta z tego pliku jako glownego zrodla zaleznosci.
+
+--extra-index-url https://download.pytorch.org/whl/cu121
+
+# App / backend
 aiohttp>=3.9
 ebooklib>=0.18
 beautifulsoup4>=4.12
@@ -7,3 +12,48 @@ lxml>=5.0
 pyinstaller>=6.0
 yt-dlp>=2025.1.0
 faster-whisper>=1.0.3
+fastapi>=0.110
+uvicorn>=0.30
+python-multipart>=0.0.9
+pydantic>=2.9.2
+
+# Audio + TTS stack
+numpy>=2.0
+soundfile>=0.13
+pydub>=0.25
+torchaudio==2.5.1
+torch==2.5.1
+torchvision==0.20.1
+bitsandbytes>=0.49.2
+sageattention
+
+# fish_speech runtime deps
+tqdm
+loguru
+transformers>=4.45.2
+einops>=0.7.0
+librosa>=0.10.1
+rich>=13.5.3
+ormsgpack
+tiktoken>=0.8.0
+cachetools
+zstandard>=0.22.0
+resampy>=0.4.3
+safetensors>=0.4.0
+pyrootutils>=1.0.4
+natsort>=8.4.0
+loralib>=0.1.2
+hydra-core>=1.3.2
+omegaconf>=2.3.0
+huggingface-hub>=0.25
+
+# DAC / audiotools
+descript-audio-codec
+descript-audiotools>=0.7.2
+flatten-dict
+importlib-resources
+julius
+randomname
+ffmpy
+argbind
+tensorboard

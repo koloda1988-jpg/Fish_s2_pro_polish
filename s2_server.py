@@ -72,6 +72,7 @@ DEFAULT_MODEL = str(THIS_DIR / "models" / "s2-pro")
 
 MODEL_PATH = os.environ.get("S2_MODEL_PATH", DEFAULT_MODEL)
 DEVICE     = os.environ.get("S2_DEVICE", "cuda").strip().lower()
+DECODER_DEVICE_CFG = os.environ.get("S2_DECODER_DEVICE", "auto").strip().lower()
 BNB_MODE   = os.environ.get("S2_BNB_MODE", "nf4").strip().lower()
 PRECISION  = os.environ.get("S2_PRECISION", "float16").strip().lower()
 ATTENTION  = os.environ.get("S2_ATTENTION", "sdpa").strip().lower()
@@ -100,6 +101,24 @@ log = logging.getLogger("s2_server")
 logging.getLogger("FishAudioS2").setLevel(logging.INFO)
 
 import torch  # po sys.path, ale przed reszta
+
+# Patch einops: zepsute/bazowe tensorflow stuby w venvie powoduja
+# AttributeError w TensorflowBackend.is_appropriate_type().
+# Nie dotykamy calego get_backend — tylko bezpiecznie zabezpieczamy backend TF.
+try:
+    import einops._backends as _eb
+    if hasattr(_eb, "TensorflowBackend"):
+        _orig_tf_is_appropriate = _eb.TensorflowBackend.is_appropriate_type
+
+        def _safe_tf_is_appropriate(self, tensor):
+            try:
+                return _orig_tf_is_appropriate(self, tensor)
+            except Exception:
+                return False
+
+        _eb.TensorflowBackend.is_appropriate_type = _safe_tf_is_appropriate
+except Exception as _patch_err:
+    log.warning(f"einops patch nieudany: {_patch_err}")
 
 DTYPE_MAP = {
     "bfloat16": torch.bfloat16,
@@ -243,11 +262,30 @@ def _load_engine():
         raise FileNotFoundError(f"S2_MODEL_PATH nie istnieje: {model_dir}")
 
     decoder_ckpt = _resolve_decoder(model_dir)
+    decoder_device = DECODER_DEVICE_CFG
+    if decoder_device == "auto":
+        decoder_device = DEVICE
+        if DEVICE == "cuda" and torch.cuda.is_available():
+            try:
+                cc_major, cc_minor = torch.cuda.get_device_capability()
+                # RTX 50xx (sm_120) z obecnymi wheelami torch/bnb bywa nieobslugiwane
+                # dla czesci operacji DAC. Wtedy bezpieczniej trzymac codec na CPU.
+                if cc_major >= 12:
+                    log.warning(
+                        "Wykryto GPU sm_%d%d; wymuszam DAC na CPU (S2_DECODER_DEVICE=cpu), "
+                        "zeby uniknac 'no kernel image' w codec.",
+                        cc_major,
+                        cc_minor,
+                    )
+                    decoder_device = "cpu"
+            except Exception as e:
+                log.warning("Nie mozna odczytac compute capability GPU: %s", e)
 
     log.info("Konfiguracja:")
     log.info("  MODEL_PATH = %s", model_dir)
     log.info("  DECODER    = %s", decoder_ckpt)
     log.info("  DEVICE     = %s", DEVICE)
+    log.info("  DECODER_DEVICE = %s", decoder_device)
     log.info("  PRECISION  = %s (%s)", PRECISION, dtype)
     log.info("  BNB_MODE   = %s", bnb)
     log.info("  ATTENTION  = %s", attention)
@@ -274,7 +312,7 @@ def _load_engine():
     decoder_model = load_decoder_model(
         config_name="modded_dac_vq",
         checkpoint_path=str(decoder_ckpt),
-        device=DEVICE,
+        device=decoder_device,
     )
 
     engine = TTSInferenceEngine(

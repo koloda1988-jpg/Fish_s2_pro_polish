@@ -1,7 +1,7 @@
 // main.js — Electron main process (v3 z s2_server.py)
 //
 // Co robi:
-// 1) Spawnuje `s2_server.py` (TTS HTTP, port 8080) w venv ComfyUI
+// 1) Spawnuje `s2_server.py` (TTS HTTP, port 8080) w lokalnym venv projektu
 // 2) Pokazuje splash window "Ładowanie modelu..." podczas cold loadu
 // 3) Polling GET / aż serwer odpowie 200 (cold load 30-90 s)
 // 4) Spawnuje `python_backend.py` (JSON-RPC orchestrator)
@@ -17,10 +17,6 @@ const https = require('https');
 
 // ─── Konfiguracja ───────────────────────────────────────────────────────────
 
-// Domyślna ścieżka do venv ComfyUI (Stability Matrix). Można nadpisać przez
-// env var COMFYUI_PYTHON.
-const DEFAULT_COMFY_PYTHON = 'E:\\StabilityMatrix\\Packages\\ComfyUI\\venv\\Scripts\\python.exe';
-
 // Kiedy apka jest spakowana przez electron-builder:
 //   process.resourcesPath  = <InstallDir>\resources
 //   INSTALL_DIR            = <InstallDir>             (tu lezy venv\ i models\)
@@ -30,9 +26,18 @@ const DEFAULT_COMFY_PYTHON = 'E:\\StabilityMatrix\\Packages\\ComfyUI\\venv\\Scri
 const INSTALL_DIR         = app.isPackaged ? path.dirname(process.resourcesPath) : __dirname;
 const PYTHON_SCRIPTS_DIR  = app.isPackaged ? process.resourcesPath               : __dirname;
 const S2_SERVER_PY        = path.join(PYTHON_SCRIPTS_DIR, 's2_server.py');
+const LOCAL_VENV_PYTHON   = path.join(INSTALL_DIR, 'venv', 'Scripts', 'python.exe');
 
 const HF_REPO = 'fishaudio/fish-speech-1.5';
+const HF_REPO_BNB = 'groxaxo/s2-pro-BnB-4Bits';
 const HF_BASE = 'https://huggingface.co';
+
+// Rejestr dostepnych modeli — klucz uzywa renderer
+const MODEL_REGISTRY = {
+  's2pro': { repo: HF_REPO,     dirName: 's2-pro' },
+  'bnb':   { repo: HF_REPO_BNB, dirName: 's2-pro-BnB-4Bits' },
+};
+function modelEntry(key) { return MODEL_REGISTRY[key] || MODEL_REGISTRY['s2pro']; }
 let _dlController = null;  // kontroler anulowania pobierania modelu
 
 const S2_HOST = '127.0.0.1';
@@ -122,22 +127,16 @@ function setSplashError(msg) {
 
 // ─── s2_server.py spawn ────────────────────────────────────────────────────
 
-function getComfyPython() {
-  // 1. Nadpisanie przez env var
-  if (process.env.COMFYUI_PYTHON) return process.env.COMFYUI_PYTHON;
-  // 2. Lokalne venv (stworzone przez instalator lub install.ps1)
-  const localVenv = path.join(INSTALL_DIR, 'venv', 'Scripts', 'python.exe');
-  if (fs.existsSync(localVenv)) return localVenv;
-  // 3. Domyślny venv ComfyUI (tryb dev / legacy)
-  return DEFAULT_COMFY_PYTHON;
+function getProjectPython() {
+  return LOCAL_VENV_PYTHON;
 }
 
 function startS2Server() {
-  const py = getComfyPython();
+  const py = getProjectPython();
   if (!fs.existsSync(py)) {
-    setSplashError(`Nie znaleziono Pythona venv ComfyUI: ${py}\n` +
-                   `Ustaw env var COMFYUI_PYTHON na pełną ścieżkę.`);
-    throw new Error('Brak Pythona venv ComfyUI: ' + py);
+    setSplashError(`Nie znaleziono lokalnego venv projektu: ${py}\n` +
+                   `Uruchom .\\install.ps1, aby utworzyć .\\venv.`);
+    throw new Error('Brak lokalnego venv projektu: ' + py);
   }
   if (!fs.existsSync(S2_SERVER_PY)) {
     setSplashError('Nie znaleziono s2_server.py: ' + S2_SERVER_PY);
@@ -162,8 +161,14 @@ function startS2Server() {
       S2_ATTENTION: process.env.S2_ATTENTION || 'sage_attention',
       S2_DEVICE: process.env.S2_DEVICE || 'cuda',
       S2_COMPILE: process.env.S2_COMPILE || '1',
-      // Jawna ścieżka do modelu — <InstallDir>\models\s2-pro
-      S2_MODEL_PATH: process.env.S2_MODEL_PATH || path.join(INSTALL_DIR, 'models', 's2-pro'),
+      // Jawna ścieżka do modelu — preferuj s2-pro-BnB-4Bits jesli istnieje
+      S2_MODEL_PATH: (() => {
+        if (process.env.S2_MODEL_PATH) return process.env.S2_MODEL_PATH;
+        const bnbDir  = path.join(INSTALL_DIR, 'models', 's2-pro-BnB-4Bits');
+        const hasFiles = fs.existsSync(bnbDir) &&
+          fs.readdirSync(bnbDir).some(f => /\.(pth|safetensors|ckpt|bin)$/i.test(f));
+        return hasFiles ? bnbDir : path.join(INSTALL_DIR, 'models', 's2-pro');
+      })(),
     },
   });
 
@@ -262,10 +267,9 @@ function pollHealth() {
 function getBackendLaunchConfig() {
   if (app.isPackaged) {
     // Tryb zainstalowany: używamy lokalnego venv + python_backend.py z resources
-    const venvPy     = path.join(INSTALL_DIR, 'venv', 'Scripts', 'python.exe');
     const scriptPath = path.join(process.resourcesPath, 'python_backend.py');
-    if (fs.existsSync(venvPy)) {
-      return { command: venvPy, args: [scriptPath], mode: 'local-venv' };
+    if (fs.existsSync(LOCAL_VENV_PYTHON)) {
+      return { command: LOCAL_VENV_PYTHON, args: [scriptPath], mode: 'local-venv' };
     }
     // Fallback: skompilowane exe (jeśli pyinstaller build był wykonany)
     const exePath = path.join(process.resourcesPath, 'python_backend.exe');
@@ -273,16 +277,13 @@ function getBackendLaunchConfig() {
       return { command: exePath, args: [], mode: 'bundled' };
     }
   }
-  // Tryb dev: venv ComfyUI lub lokalne venv
+  // Tryb dev: wyłącznie lokalne venv projektu
   const scriptPath = path.join(__dirname, 'python_backend.py');
-  const py = getComfyPython();
+  const py = getProjectPython();
   if (fs.existsSync(py)) {
-    return { command: py, args: [scriptPath], mode: 'comfy-venv' };
+    return { command: py, args: [scriptPath], mode: 'local-venv' };
   }
-  if (process.platform === 'win32') {
-    return { command: 'py', args: ['-3', scriptPath], mode: 'system-python' };
-  }
-  return { command: 'python3', args: [scriptPath], mode: 'system-python' };
+  throw new Error(`Brak lokalnego venv projektu: ${py}. Uruchom .\\install.ps1.`);
 }
 
 function startPythonBackend() {
@@ -545,8 +546,9 @@ ipcMain.handle('gemini:prepareBook', async (_evt, payload) => {
 
 // ─── Models manager IPC ─────────────────────────────────────────────────────
 
-ipcMain.handle('models:getLocalStatus', async () => {
-  const modelsDir = path.join(INSTALL_DIR, 'models', 's2-pro');
+ipcMain.handle('models:getLocalStatus', async (_evt, modelKey) => {
+  const { dirName } = modelEntry(modelKey || 's2pro');
+  const modelsDir = path.join(INSTALL_DIR, 'models', dirName);
   try {
     if (!fs.existsSync(modelsDir)) return { installed: false, files: [], dir: modelsDir };
     const files = fs.readdirSync(modelsDir).map(f => {
@@ -561,10 +563,11 @@ ipcMain.handle('models:getLocalStatus', async () => {
   }
 });
 
-ipcMain.handle('models:listRemote', async () => {
+ipcMain.handle('models:listRemote', async (_evt, modelKey) => {
+  const { repo } = modelEntry(modelKey || 's2pro');
   return new Promise((resolve, reject) => {
     const req = https.get(
-      `${HF_BASE}/api/models/${HF_REPO}`,
+      `${HF_BASE}/api/models/${repo}`,
       { headers: { 'User-Agent': 'AudiobookGenerator/3.1' } },
       (res) => {
         let body = '';
@@ -584,25 +587,33 @@ ipcMain.handle('models:listRemote', async () => {
   });
 });
 
-ipcMain.handle('models:startDownload', async (_evt, { filename, repo }) => {
-  const modelsDir = path.join(INSTALL_DIR, 'models', 's2-pro');
+ipcMain.handle('models:startDownload', async (_evt, { filename, modelKey }) => {
+  const { repo, dirName } = modelEntry(modelKey || 's2pro');
+  const modelsDir = path.join(INSTALL_DIR, 'models', dirName);
   if (!fs.existsSync(modelsDir)) fs.mkdirSync(modelsDir, { recursive: true });
   const targetPath = path.join(modelsDir, filename);
-  const repoToUse  = repo || HF_REPO;
+  const repoToUse  = repo;
   const downloadUrl = `${HF_BASE}/${repoToUse}/resolve/main/${encodeURIComponent(filename)}`;
   _dlController = { cancelled: false };
   const ctrl = _dlController;
 
   return new Promise((resolve, reject) => {
-    const doGet = (u, depth = 0) => {
-      if (depth > 6)        return reject(new Error('Za dużo przekierowań'));
-      if (ctrl.cancelled)   return reject(new Error('Anulowano'));
-      const parsedUrl = new URL(u);
+    const doGet = (u, depth = 0, baseUrl = null) => {
+      if (depth > 6)      return reject(new Error('Za dużo przekierowań'));
+      if (ctrl.cancelled) return reject(new Error('Anulowano'));
+      // Rozwiaz relatywne URL-e (np. /resolve/... zamiast https://...)
+      let resolvedUrl = u;
+      if (u && !u.match(/^https?:\/\//i)) {
+        resolvedUrl = baseUrl ? new URL(u, baseUrl).toString() : `${HF_BASE}${u.startsWith('/') ? '' : '/'}${u}`;
+      }
+      let parsedUrl;
+      try { parsedUrl = new URL(resolvedUrl); }
+      catch (e) { return reject(new Error(`Nieprawidlowy URL przekierowania: ${resolvedUrl}`)); }
       const mod = parsedUrl.protocol === 'https:' ? https : http;
-      const req = mod.get(u, { headers: { 'User-Agent': 'AudiobookGenerator/3.1' } }, (res) => {
+      const req = mod.get(resolvedUrl, { headers: { 'User-Agent': 'AudiobookGenerator/3.1' } }, (res) => {
         if ([301, 302, 307, 308].includes(res.statusCode)) {
           res.resume();
-          doGet(res.headers.location, depth + 1);
+          doGet(res.headers.location, depth + 1, resolvedUrl);
           return;
         }
         if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
@@ -654,8 +665,9 @@ ipcMain.handle('models:cancelDownload', () => {
   }
 });
 
-ipcMain.handle('models:openDir', () => {
-  const modelsDir = path.join(INSTALL_DIR, 'models', 's2-pro');
+ipcMain.handle('models:openDir', (_evt, modelKey) => {
+  const { dirName } = modelEntry(modelKey || 's2pro');
+  const modelsDir = path.join(INSTALL_DIR, 'models', dirName);
   if (!fs.existsSync(modelsDir)) fs.mkdirSync(modelsDir, { recursive: true });
   shell.openPath(modelsDir);
 });
