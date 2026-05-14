@@ -149,3 +149,6 @@ Get-ChildItem $dst -Recurse -File -ErrorAction SilentlyContinue |
 Write-Host "`nGOTOWE." -ForegroundColor Green
 Write-Host "Lokalizacja backupu:" -ForegroundColor White
 Write-Host "  $dst" -ForegroundColor Yellow
+
+Write-Host "`n=== SYNC DIST ===" -ForegroundColor Cyan
+& "$PSScriptRoot\sync_dist.ps1"
