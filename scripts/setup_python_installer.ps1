@@ -1,4 +1,4 @@
-# setup_python_installer.ps1 — konfiguracja srodowiska Python
+# setup_python_installer.ps1 - konfiguracja srodowiska Python
 # Uruchamiany automatycznie przez instalator NSIS po skopiowaniu plikow.
 # Mozna tez uruchomic recznie: .\resources\setup_python_installer.ps1 -InstallDir "C:\Apps\AudiobookGenerator"
 
@@ -7,8 +7,12 @@ param(
     [string]$InstallDir
 )
 
-$Host.UI.RawUI.WindowTitle = "Audiobook Generator — Konfiguracja Python"
+try { $Host.UI.RawUI.WindowTitle = "Audiobook Generator - Konfiguracja Python" } catch {}
 $ErrorActionPreference = 'Continue'
+
+# Log do pliku (pomocny przy diagnozowaniu bledow)
+$logFile = Join-Path $InstallDir "python_setup.log"
+try { Start-Transcript -Path $logFile -Force -ErrorAction SilentlyContinue } catch {}
 
 function Write-Step { param($n, $msg) Write-Host "`n[$n] $msg" -ForegroundColor Cyan }
 function Write-OK   { param($msg)    Write-Host "  OK: $msg"   -ForegroundColor Green }
@@ -16,7 +20,7 @@ function Write-WARN { param($msg)    Write-Host "  WARN: $msg" -ForegroundColor 
 function Write-FAIL { param($msg)    Write-Host "  FAIL: $msg" -ForegroundColor Red }
 
 Write-Host "=============================================" -ForegroundColor Magenta
-Write-Host "  Audiobook Generator — Konfiguracja Python" -ForegroundColor White
+Write-Host "  Audiobook Generator - Konfiguracja Python" -ForegroundColor White
 Write-Host "  Katalog instalacji: $InstallDir"            -ForegroundColor DarkGray
 Write-Host "=============================================" -ForegroundColor Magenta
 
@@ -47,7 +51,7 @@ foreach ($cmd in $candidates) {
 
 if (-not $pythonExe) {
     Write-Host ""
-    Write-Host "  Python 3.10+ nie znaleziony — probuje zainstalowac automatycznie..." -ForegroundColor Yellow
+    Write-Host "  Python 3.10+ nie znaleziony - probuje zainstalowac automatycznie..." -ForegroundColor Yellow
 
     # Proba 1: winget (dostepny na Windows 10/11 z App Installer)
     $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
@@ -101,7 +105,7 @@ if (-not $pythonExe) {
     Write-Host "  Zainstaluj recznie Python 3.11 lub 3.12 z https://www.python.org/downloads/" -ForegroundColor Yellow
     Write-Host "  Zaznacz 'Add Python to PATH' podczas instalacji."                            -ForegroundColor Yellow
     Write-Host ""
-    Read-Host "Nacisnij Enter aby zamknac"
+    Start-Sleep -Seconds 15
     exit 1
 }
 
@@ -118,7 +122,7 @@ if (-not (Test-Path $venvPy)) {
     & $pythonExe -m venv $venvDir
     if ($LASTEXITCODE -ne 0) {
         Write-FAIL "Tworzenie venv nieudane (kod $LASTEXITCODE)"
-        Read-Host "Nacisnij Enter aby zamknac"
+        Start-Sleep -Seconds 15
         exit 1
     }
     Write-OK "venv utworzone: $venvDir"
@@ -153,14 +157,14 @@ Write-Step 4 "Sprawdzam PyTorch (CUDA 12.1)..."
 
 $torchVer = & $venvPy -c "import torch; print(torch.__version__)" 2>&1
 if ($torchVer -match "^\d") {
-    Write-OK "PyTorch $torchVer juz zainstalowany"
+    Write-OK "PyTorch $torchVer juz zainstalowany -- pomijam"
 } else {
-    Write-Host "  Pobieranie PyTorch — moze zajac kilka minut (~2 GB)..." -ForegroundColor Yellow
+    Write-Host "  Pobieranie PyTorch - moze zajac kilka minut (~2 GB)..." -ForegroundColor Yellow
     Write-Host "  Indeks: https://download.pytorch.org/whl/cu121" -ForegroundColor DarkGray
     & $venvPy -m pip install torch torchvision torchaudio `
         --index-url https://download.pytorch.org/whl/cu121
     if ($LASTEXITCODE -ne 0) {
-        Write-WARN "Instalacja PyTorch nieudana — sprawdz polaczenie internetowe i wersje CUDA"
+        Write-WARN "Instalacja PyTorch nieudana - sprawdz polaczenie internetowe i wersje CUDA"
         Write-WARN "Mozesz zainstalowac recznie: pip install torch --index-url https://download.pytorch.org/whl/cu121"
     } else {
         $torchVer2 = & $venvPy -c "import torch; print(torch.__version__)" 2>&1
@@ -178,7 +182,12 @@ $missing  = @()
 foreach ($pkg in $fishDeps) {
     $modName = $pkg.Replace("-", "_")
     $check   = & $venvPy -c "import $modName" 2>&1
-    if ($LASTEXITCODE -ne 0) { $missing += $pkg }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  Brak: $pkg" -ForegroundColor DarkGray
+        $missing += $pkg
+    } else {
+        Write-OK "$pkg OK"
+    }
 }
 
 if ($missing.Count -gt 0) {
@@ -190,7 +199,7 @@ if ($missing.Count -gt 0) {
         Write-OK "Zaleznosci Fish Speech zainstalowane"
     }
 } else {
-    Write-OK "Zaleznosci Fish Speech OK"
+    Write-OK "Wszystkie zaleznosci Fish Speech juz zainstalowane -- pomijam"
 }
 
 # ─── Podsumowanie ──────────────────────────────────────────────────────────
@@ -208,4 +217,5 @@ Write-Host "=============================================" -ForegroundColor Mage
 Write-Host ""
 
 Start-Sleep -Seconds 3
+try { Stop-Transcript -ErrorAction SilentlyContinue } catch {}
 exit 0

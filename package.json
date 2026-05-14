@@ -47,7 +47,8 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "allowElevation": true,
+      "allowElevation": false,
+      "perMachine": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Audiobook Generator",

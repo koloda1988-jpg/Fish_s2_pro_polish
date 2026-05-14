@@ -1,7 +1,7 @@
 # Python dependencies dla Audiobook Generator v3
 # Uwaga: instalator korzysta z tego pliku jako glownego zrodla zaleznosci.
 
---extra-index-url https://download.pytorch.org/whl/cu121
+--extra-index-url https://download.pytorch.org/whl/cu130
 
 # App / backend
 aiohttp>=3.9
@@ -21,11 +21,12 @@ pydantic>=2.9.2
 numpy>=2.0
 soundfile>=0.13
 pydub>=0.25
-torchaudio==2.5.1
-torch==2.5.1
-torchvision==0.20.1
+torchaudio==2.11.0+cu130
+torch==2.12.0+cu130
+torchvision==0.27.0+cu130
 bitsandbytes>=0.49.2
-sageattention
+triton-windows==3.5.1.post22
+sageattention @ https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu130torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl
 
 # fish_speech runtime deps
 tqdm

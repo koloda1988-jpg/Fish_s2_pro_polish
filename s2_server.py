@@ -169,7 +169,7 @@ def _patch_attention(attention: str):
         bsz, seqlen, _ = x.shape
         q_size = self.n_head * self.head_dim
         kv_size = self.n_local_heads * self.head_dim
-        q, k, v = self.wqkv(x).split([q_size, kv_size, kv_size], dim=-1)
+        q, k, v = self.wqkv(x).to(x.dtype).split([q_size, kv_size, kv_size], dim=-1)
         q = q.view(bsz, seqlen, self.n_head, self.head_dim)
         k = k.view(bsz, seqlen, self.n_local_heads, self.head_dim)
         v = v.view(bsz, seqlen, self.n_local_heads, self.head_dim)
@@ -179,6 +179,7 @@ def _patch_attention(attention: str):
         q, k, v = map(lambda t: t.transpose(1, 2), (q, k, v))
         if self.kv_cache is not None:
             k, v = self.kv_cache.update(input_pos, k, v)
+            q = q.to(k.dtype)  # align q with cached k/v dtype (BnB NF4 may return float32)
         k = k.repeat_interleave(self.n_head // self.n_local_heads, dim=1)
         v = v.repeat_interleave(self.n_head // self.n_local_heads, dim=1)
         y = F.scaled_dot_product_attention(
@@ -194,16 +195,20 @@ def _patch_attention(attention: str):
         try:
             from sageattention import sageattn
         except ImportError as e:
-            raise RuntimeError(
-                "S2_ATTENTION=sage_attention, ale brak pakietu sageattention. "
-                "Zainstaluj go w venv ComfyUI lub ustaw S2_ATTENTION=sdpa."
-            ) from e
+            log.warning(
+                f"Nie mozna zaladowac sageattention ({e}). "
+                "Triton nie jest dostepny na Windows – uzywam SDPA jako fallback."
+            )
+            forward = _sdpa_forward
+            orig = Attention.forward
+            Attention.forward = forward
+            return orig, Attention
 
         def _sage_forward(self, x, freqs_cis, mask, input_pos=None):
             bsz, seqlen, _ = x.shape
             q_size = self.n_head * self.head_dim
             kv_size = self.n_local_heads * self.head_dim
-            q, k, v = self.wqkv(x).split([q_size, kv_size, kv_size], dim=-1)
+            q, k, v = self.wqkv(x).to(x.dtype).split([q_size, kv_size, kv_size], dim=-1)
             q = q.view(bsz, seqlen, self.n_head, self.head_dim)
             k = k.view(bsz, seqlen, self.n_local_heads, self.head_dim)
             v = v.view(bsz, seqlen, self.n_local_heads, self.head_dim)
@@ -213,6 +218,7 @@ def _patch_attention(attention: str):
             q, k, v = map(lambda t: t.transpose(1, 2), (q, k, v))
             if self.kv_cache is not None:
                 k, v = self.kv_cache.update(input_pos, k, v)
+                q = q.to(k.dtype)  # align q with cached k/v dtype (BnB NF4 may return float32)
             k = k.repeat_interleave(self.n_head // self.n_local_heads, dim=1)
             v = v.repeat_interleave(self.n_head // self.n_local_heads, dim=1)
             if mask is None:
@@ -268,16 +274,17 @@ def _load_engine():
         if DEVICE == "cuda" and torch.cuda.is_available():
             try:
                 cc_major, cc_minor = torch.cuda.get_device_capability()
-                # RTX 50xx (sm_120) z obecnymi wheelami torch/bnb bywa nieobslugiwane
-                # dla czesci operacji DAC. Wtedy bezpieczniej trzymac codec na CPU.
-                if cc_major >= 12:
+                sm_name = f"sm_{cc_major}{cc_minor}"
+                supported = torch.cuda.get_arch_list()
+                if sm_name not in supported:
                     log.warning(
-                        "Wykryto GPU sm_%d%d; wymuszam DAC na CPU (S2_DECODER_DEVICE=cpu), "
-                        "zeby uniknac 'no kernel image' w codec.",
-                        cc_major,
-                        cc_minor,
+                        "Wykryto GPU %s; nie jest obslugiwane przez obecny torch (%s). "
+                        "Wymuszam DAC na CPU zeby uniknac 'no kernel image' w codec.",
+                        sm_name, ", ".join(supported[-3:]),
                     )
                     decoder_device = "cpu"
+                else:
+                    log.info("GPU %s obslugiwane przez torch — DAC bedzie na CUDA.", sm_name)
             except Exception as e:
                 log.warning("Nie mozna odczytac compute capability GPU: %s", e)
 

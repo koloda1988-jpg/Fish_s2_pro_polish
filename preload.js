@@ -24,11 +24,11 @@ contextBridge.exposeInMainWorld('api', {
   prepareBookWithGemini: (payload) => ipcRenderer.invoke('gemini:prepareBook', payload),
 
   // Models manager
-  getModelsStatus:   ()     => ipcRenderer.invoke('models:getLocalStatus'),
-  listRemoteModels:  ()     => ipcRenderer.invoke('models:listRemote'),
-  downloadModelFile: (opts) => ipcRenderer.invoke('models:startDownload', opts),
-  cancelDownload:    ()     => ipcRenderer.invoke('models:cancelDownload'),
-  openModelsDir:     ()     => ipcRenderer.invoke('models:openDir'),
+  getModelsStatus:   (modelKey) => ipcRenderer.invoke('models:getLocalStatus', modelKey),
+  listRemoteModels:  (modelKey) => ipcRenderer.invoke('models:listRemote', modelKey),
+  downloadModelFile: (opts)     => ipcRenderer.invoke('models:startDownload', opts),
+  cancelDownload:    ()         => ipcRenderer.invoke('models:cancelDownload'),
+  openModelsDir:     (modelKey) => ipcRenderer.invoke('models:openDir', modelKey),
   onModelProgress: (cb) => {
     const fn = (_evt, data) => cb(data);
     ipcRenderer.on('models:progress', fn);

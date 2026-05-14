@@ -8,7 +8,6 @@
 
 !macro customInstall
   SetDetailsPrint both
-  ShowInstDetails show
 
   ; Katalogi robocze aplikacji (poza resources\)
   DetailPrint "Tworzenie katalogow roboczych..."
@@ -25,10 +24,7 @@
   DetailPrint "Otworzy sie okno konsoli — nie zamykaj go!"
   DetailPrint "(Pobieranie PyTorch CUDA moze zajac kilka minut)"
 
-  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" \
-    -NoProfile -ExecutionPolicy Bypass \
-    -File "$INSTDIR\resources\setup_python_installer.ps1" \
-    -InstallDir "$INSTDIR"' $0
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$\"$INSTDIR\resources\setup_python_installer.ps1$\"" -InstallDir "$\"$INSTDIR$\""' $0
 
   ${If} $0 != 0
     DetailPrint "OSTRZEZENIE: Konfiguracja Python nie powiodla sie (kod: $0)"
@@ -42,11 +38,8 @@ $INSTDIR\models\s2-pro\"
     DetailPrint "Srodowisko Python gotowe!"
     MessageBox MB_OK|MB_ICONINFORMATION \
       "Instalacja zakonczona!$\n$\n\
-Uwaga: Model Fish Speech S2-Pro nie jest dolaczony do instalatora$\n\
-(zbyt duzy — kilka GB).$\n$\n\
-Skopiuj pliki modelu do:$\n\
-$INSTDIR\models\s2-pro\$\n$\n\
-lub uruchom ponownie z parametrem -ModelPath."
+Model TTS (Fish Speech S2-Pro) mozna pobrac bezposrednio$\n\
+z poziomu aplikacji — przycisk [Modele] w gornym pasku."
   ${EndIf}
 !macroend
 

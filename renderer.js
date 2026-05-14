@@ -2161,6 +2161,13 @@ async function bootstrap() {
   attachBackendEvents();
   updateButtonsState();
 
+  // Inicjalizacja workdir — pobierz domyslny katalog z main procesu jesli pusty
+  if (!els.workdir.value.trim()) {
+    try {
+      const defaultWd = await window.api.getDefaultWorkdir();
+      if (defaultWd) els.workdir.value = defaultWd;
+    } catch (_) {}
+  }
   state.workdir = els.workdir.value.trim() || state.workdir;
 
   // KRYTYCZNE: wczytaj liste dostepnych lektorow PRZED zbudowaniem speaker->voice UI,
@@ -2398,9 +2405,89 @@ function formatFileSize(bytes) {
   return (bytes / 1024).toFixed(0) + ' KB';
 }
 
+// ─── BnB model (groxaxo/s2-pro-BnB-4Bits) ──────────────────────────────────
+
+async function refreshBnBLocalStatus() {
+  const el = document.getElementById('bnb-local-status');
+  if (!el) return;
+  try {
+    const { files, dir, hasModel } = await window.api.getModelsStatus('bnb');
+    if (!files || files.length === 0) {
+      el.innerHTML = `<span style="color:#f59e0b;">⚠ Brak plików — kliknij Pobierz</span>
+        <div style="font-size:11px;color:#5b6070;word-break:break-all;margin-top:2px;">${escapeHtml(dir)}</div>`;
+    } else {
+      const badge = hasModel
+        ? `<span style="color:#10b981;">✅ Model pobrany (${files.length} plików)</span>`
+        : `<span style="color:#f59e0b;">⚠ Niekompletny — ${files.length} plik(ów)</span>`;
+      el.innerHTML = badge +
+        `<div style="font-size:11px;color:#5b6070;word-break:break-all;margin-top:2px;">${escapeHtml(dir)}</div>`;
+    }
+  } catch (e) {
+    el.innerHTML = `<span style="color:#ef4444;">Błąd: ${escapeHtml(e.message)}</span>`;
+  }
+}
+
+async function downloadBnBModel() {
+  const btn = document.getElementById('btn-download-bnb');
+  const progressArea = document.getElementById('models-download-progress');
+  const dlFilename   = document.getElementById('models-dl-filename');
+  const dlPercent    = document.getElementById('models-dl-percent');
+  const dlBar        = document.getElementById('models-dl-bar');
+  const dlSize       = document.getElementById('models-dl-size');
+
+  if (_modelsDownloading) { toast('Inne pobieranie w toku — anuluj je najpierw.', 'error'); return; }
+
+  if (btn) btn.disabled = true;
+  dlFilename.textContent = 'Pobieranie listy plików z HuggingFace…';
+  progressArea.style.display = 'block';
+  dlPercent.textContent = '';
+  dlBar.style.width = '0%';
+  dlSize.textContent = '';
+
+  let files;
+  try {
+    files = await window.api.listRemoteModels('bnb');
+  } catch (e) {
+    toast(`Błąd listy plików BnB: ${e.message}`, 'error');
+    progressArea.style.display = 'none';
+    if (btn) btn.disabled = false;
+    return;
+  }
+
+  // Odfiltruj tylko pliki modelu (pomiń README, .gitattributes itp.)
+  const modelFiles = files.filter(f => !/^(README|\.git|\.lfs)/i.test(f.name));
+  if (!modelFiles.length) {
+    toast('Repozytorium nie zawiera plików modelu.', 'error');
+    progressArea.style.display = 'none';
+    if (btn) btn.disabled = false;
+    return;
+  }
+
+  _modelsDownloading = true;
+  try {
+    for (let i = 0; i < modelFiles.length; i++) {
+      const f = modelFiles[i];
+      dlFilename.textContent = `[${i + 1}/${modelFiles.length}] ${f.name}`;
+      dlPercent.textContent = '0%';
+      dlBar.style.width = '0%';
+      dlSize.textContent = 'Łączę…';
+      await window.api.downloadModelFile({ filename: f.name, modelKey: 'bnb' });
+    }
+    toast('Model s2-pro-BnB-4Bits pobrany pomyślnie! Zrestartuj aplikację aby go użyć.', 'success');
+    await refreshBnBLocalStatus();
+  } catch (e) {
+    if (e.message !== 'Anulowano') toast(`Błąd pobierania BnB: ${e.message}`, 'error');
+  } finally {
+    _modelsDownloading = false;
+    progressArea.style.display = 'none';
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function openModelsModal() {
   document.getElementById('models-modal').hidden = false;
   await refreshModelsLocal();
+  await refreshBnBLocalStatus();
   loadModelsRemote();
   if (_modelsProgressUnsub) _modelsProgressUnsub();
   _modelsProgressUnsub = window.api.onModelProgress(onModelDownloadProgress);
@@ -2521,11 +2608,15 @@ function onModelDownloadProgress(data) {
   const btnOpenDir      = document.getElementById('btn-models-open-dir');
   const btnCancel       = document.getElementById('btn-models-cancel');
   const remoteList      = document.getElementById('models-remote-list');
+  const btnDownloadBnB  = document.getElementById('btn-download-bnb');
+  const btnOpenBnBDir   = document.getElementById('btn-open-bnb-dir');
 
   if (btnModels)      btnModels.addEventListener('click', openModelsModal);
   if (btnClose)       btnClose.addEventListener('click', closeModelsModal);
   if (btnCloseFooter) btnCloseFooter.addEventListener('click', closeModelsModal);
   if (btnOpenDir)     btnOpenDir.addEventListener('click', () => window.api.openModelsDir());
+  if (btnDownloadBnB) btnDownloadBnB.addEventListener('click', downloadBnBModel);
+  if (btnOpenBnBDir)  btnOpenBnBDir.addEventListener('click', () => window.api.openModelsDir('bnb'));
   if (btnCancel)      btnCancel.addEventListener('click', async () => {
     await window.api.cancelDownload();
     toast('Pobieranie anulowane.', 'info');

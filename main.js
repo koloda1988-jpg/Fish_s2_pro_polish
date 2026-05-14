@@ -696,6 +696,9 @@ function killAllChildren() {
 
 // ─── Boot sequence ──────────────────────────────────────────────────────────
 
+// Wycisz nieszkodliwe błędy DevTools Protocol o brakującej komendzie Autofill
+app.commandLine.appendSwitch('disable-features', 'AutofillServerCommunication');
+
 app.whenReady().then(async () => {
   createSplash();
 

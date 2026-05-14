@@ -9,8 +9,8 @@ __pycache__/
 *.pyd
 .Python
 
-# Models (duże pliki binarne)
-models/
+# Models (duże pliki binarne) - tylko top-level katalog z wagami
+/models/
 
 # Dane użytkownika i wyjście
 Audiobooks/

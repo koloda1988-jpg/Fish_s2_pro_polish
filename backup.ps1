@@ -1,18 +1,19 @@
 # backup.ps1 — backup aplikacji wersja 2 do folderu backup\
 #
 # UZYCIE:
-#   .\backup.ps1                # default: Slim (~5 MB, sam kod i konfig)
-#   .\backup.ps1 -Standard      # ~325 MB (kod + Silos\ z wygenerowanymi audio)
-#   .\backup.ps1 -Full          # ~617 MB (wszystko prócz junction'a modelu)
+#   .\backup.ps1                # default: Slim (~60 MB, sam kod + konfig + lektory)
+#   .\backup.ps1 -Standard      # ~420 MB (kod + Audiobooks + dist)
+#   .\backup.ps1 -Full          # ~870 MB (wszystko prócz venv i modeli)
 #
-# Co kazdy tryb wyklucza:
-#   Slim     : node_modules, __pycache__, models (junction), Silos, .cache
-#   Standard : node_modules, __pycache__, models (junction), .cache
-#   Full     :                __pycache__, models (junction), .cache
+# Co kazdy tryb wyklucza (poza zawsze: venv, models, __pycache__, .cache):
+#   Slim     : + node_modules, dist, backend-build, backend-dist, backend-spec, Audiobooks
+#   Standard : + node_modules, backend-build, backend-dist, backend-spec
+#   Full     : (nic dodatkowego)
 #
-# Uwaga: junction 'models\s2-pro' jest ZAWSZE pomijany — wskazuje na 11 GB
-# modelu na E:\, nie chcemy tego zaslepiac w backupie. Junction zostanie
-# odtworzony przy restore'cie przez `mklink /J`.
+# Uwaga: 'venv' i 'models' sa ZAWSZE pomijane:
+#   - venv (~4 GB) mozna odtworzyc przez .\install.ps1
+#   - models\s2-pro to junction na E:\ (11 GB), models\s2-pro-BnB-4Bits (~4.7 GB)
+# Odtworz je recznie po restore lub przez install.ps1.
 
 param(
     [switch]$Slim,
@@ -46,13 +47,14 @@ if (-not (Test-Path $backupRoot)) {
 }
 
 # Lista folderow do wykluczenia w zaleznosci od trybu
-$excludeDirs = @("__pycache__", "models", ".cache")
+# venv i models sa ZAWSZE wykluczone (4+ GB kazdy, mozna odtworzyc)
+$excludeDirs = @("__pycache__", "models", "venv", ".cache")
 if ($Slim) {
-    $excludeDirs += @("node_modules", "Silos")
+    $excludeDirs += @("node_modules", "dist", "backend-build", "backend-dist", "backend-spec", "Audiobooks")
 } elseif ($Standard) {
-    $excludeDirs += @("node_modules")
+    $excludeDirs += @("node_modules", "backend-build", "backend-dist", "backend-spec")
 }
-# Full: nic wiecej
+# Full: nic dodatkowego (bez node_modules, bez dist)
 
 # Plus zawsze wykluczamy plikowo:
 $excludeFiles = @("*.pyc", "*.pyo")
@@ -115,14 +117,15 @@ Cel             : $dst
 Wykluczone katalogi : $($excludeDirs -join ', ')
 Wykluczone pliki    : $($excludeFiles -join ', ')
 
-Junction 'models\s2-pro' nie jest skopiowany (wskazuje na E:\StabilityMatrix\Packages\ComfyUI\models\fishaudioS2\s2-pro).
 Aby przywrocic backup:
   1) Skopiuj zawartosc tego folderu do docelowej lokalizacji projektu
-  2) Odtworz junction (jezeli model istnieje na E:):
-     cmd /c mklink /J "<docelowa>\models\s2-pro" "E:\StabilityMatrix\Packages\ComfyUI\models\fishaudioS2\s2-pro"
-  3) Jezeli backup byl Slim, zainstaluj zaleznosci npm:
+  2) Zainstaluj zaleznosci npm i venv:
      cd <docelowa>
      npm install
+     .\install.ps1
+  3) Odtworz junction modelu s2-pro (jezeli model istnieje na E:):
+     cmd /c mklink /J "<docelowa>\models\s2-pro" "E:\StabilityMatrix\Packages\ComfyUI\models\fishaudioS2\s2-pro"
+     (lub skopiuj folder models\s2-pro-BnB-4Bits recznie)
 "@
 
 $infoPath = Join-Path $dst "BACKUP_INFO.txt"
