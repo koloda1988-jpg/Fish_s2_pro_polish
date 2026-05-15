@@ -7,7 +7,7 @@
   <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; media-src file: 'self';">
-  <title>Audiobook Generator</title>
+  <title>Fin Fish Voice</title>
   <link rel="stylesheet" href="renderer.css">
 </head>
 <body>
@@ -19,11 +19,15 @@
           <path d="M3 18v-6a9 9 0 0 1 18 0v6"/>
           <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>
         </svg>
-        <span>Audiobook Generator</span>
+        <span>Fin Fish Voice</span>
+          <span style="font-size:10px;color:#a855f7;margin-left:6px;font-weight:400;">v0.1 β</span>
       </div>
       <span class="badge" id="backend-status">backend...</span>
     </div>
     <div class="header-right">
+      <button class="btn btn-ghost" id="btn-about" title="O aplikacji">
+        ℹ O aplikacji
+      </button>
       <button class="btn btn-ghost" id="btn-reload-app" title="Odśwież interfejs (F5) — bez restartu serwera TTS">
         🔄 Odśwież
       </button>
@@ -786,5 +790,40 @@
   </div>
 
   <script src="renderer.js"></script>
+
+  <!-- About modal -->
+  <div id="about-modal" hidden style="
+    position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;
+    display:flex;align-items:center;justify-content:center;">
+    <div style="
+      background:#1a1a2e;border:1px solid #a855f7;border-radius:14px;
+      padding:36px 40px;min-width:360px;max-width:440px;text-align:center;
+      box-shadow:0 8px 40px rgba(0,0,0,.6);color:#e8eaed;font-family:inherit;">
+      <div style="font-size:56px;line-height:1;margin-bottom:12px;">🐟</div>
+      <h2 style="margin:0 0 4px;font-size:22px;font-weight:800;letter-spacing:3px;color:#fff;">
+        FIN FISH VOICE
+      </h2>
+      <div style="color:#a855f7;font-size:13px;margin-bottom:18px;">v0.1 beta</div>
+      <div style="color:#8a8f99;font-size:12px;margin-bottom:6px;">
+        Aplikacja do audioksiążek / Audiobook Maker
+      </div>
+      <div style="color:#8a8f99;font-size:12px;margin-bottom:22px;">
+        Silnik TTS: Fish Speech S2-Pro NF4
+      </div>
+      <div style="border-top:1px solid #2a2a4a;padding-top:18px;margin-bottom:20px;">
+        <div style="color:#c5d0e8;font-size:13px;font-weight:600;">Autor / Author</div>
+        <div style="color:#e8eaed;font-size:14px;margin-top:4px;">Łukasz Kołodziejski</div>
+        <div style="color:#a855f7;font-size:12px;">koloda</div>
+      </div>
+      <button id="about-close" style="
+        background:#a855f7;color:#fff;border:none;border-radius:8px;
+        padding:10px 32px;font-size:14px;font-weight:600;cursor:pointer;
+        transition:background .2s;"
+        onmouseover="this.style.background='#9333ea'"
+        onmouseout="this.style.background='#a855f7'">
+        Zamknij
+      </button>
+    </div>
+  </div>
 </body>
 </html>

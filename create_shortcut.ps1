@@ -105,15 +105,15 @@ Write-Host "  Ikona zapisana: app_icon.ico" -ForegroundColor Green
 Write-Host "Tworze skrot..." -ForegroundColor Cyan
 
 $shell   = New-Object -ComObject WScript.Shell
-$lnkPath = Join-Path $root "Audiobook Generator.lnk"
+$lnkPath = Join-Path $root "Fin Fish Voice.lnk"
 $sc      = $shell.CreateShortcut($lnkPath)
 $sc.TargetPath      = Join-Path $root "start_app.bat"
 $sc.WorkingDirectory= $root
 $sc.IconLocation    = "$icoPath,0"
-$sc.Description     = "Audiobook Generator - Fish Audio S2-Pro (NF4)"
+$sc.Description     = "Fin Fish Voice 0.1 beta - Audiobook Maker | Fish Audio S2-Pro (NF4) | koloda"
 $sc.WindowStyle     = 1   # normal window
 $sc.Save()
 
-Write-Host "  Skrot zapisany: Audiobook Generator.lnk" -ForegroundColor Green
+Write-Host "  Skrot zapisany: Fin Fish Voice.lnk" -ForegroundColor Green
 Write-Host ""
-Write-Host "Gotowe! Kliknij dwukrotnie 'Audiobook Generator.lnk' zeby uruchomic aplikacje." -ForegroundColor Yellow
+Write-Host "Gotowe! Kliknij dwukrotnie 'Fin Fish Voice.lnk' zeby uruchomic aplikacje." -ForegroundColor Yellow

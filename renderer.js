@@ -1644,6 +1644,21 @@ function attachEvents() {
     });
   }
 
+  // About modal
+  document.getElementById('btn-about')?.addEventListener('click', () => {
+    const m = document.getElementById('about-modal');
+    if (m) m.hidden = false;
+  });
+  document.getElementById('about-close')?.addEventListener('click', () => {
+    const m = document.getElementById('about-modal');
+    if (m) m.hidden = true;
+  });
+  document.getElementById('about-modal')?.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) {
+      e.currentTarget.hidden = true;
+    }
+  });
+
   if (els.voiceSplitBtn) els.voiceSplitBtn.addEventListener("click", splitVoice);
 
   // Delegacja zdarzeń dla przycisków na kartach lektorów (CSP blokuje onclick=)

@@ -1,7 +1,7 @@
 {
-  "name": "audiobook-generator",
-  "version": "3.1.0",
-  "description": "Audiobook Generator v3.1 — Electron + s2_server.py (Fish-Speech S2-Pro NF4)",
+  "name": "fin-fish-voice",
+  "version": "0.1.0",
+  "description": "Fin Fish Voice 0.1 beta — Aplikacja do audioksiążek / Audiobook Maker | Electron + Fish-Speech S2-Pro NF4",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -9,16 +9,16 @@
     "prebuild": "npm run build:backend",
     "build": "electron-builder --win --x64"
   },
-  "author": "Uki",
+  "author": "Łukasz Kołodziejski (koloda)",
   "license": "MIT",
   "devDependencies": {
     "electron": "^31.0.0",
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.uki.audiobook.v3",
-    "productName": "Audiobook Generator",
-    "copyright": "Copyright © 2025 Uki",
+    "appId": "com.koloda.finfish.voice",
+    "productName": "Fin Fish Voice",
+    "copyright": "Copyright \u00a9 2026 \u0141ukasz Ko\u0142odziejski (koloda)",
     "files": [
       "main.js",
       "preload.js",
@@ -51,8 +51,8 @@
       "perMachine": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Audiobook Generator",
-      "menuCategory": "Audiobook Generator",
+      "shortcutName": "Fin Fish Voice",
+      "menuCategory": "Fin Fish Voice",
       "include": "installer.nsh",
       "runAfterFinish": false,
       "language": "1045",

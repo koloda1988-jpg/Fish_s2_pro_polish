@@ -392,7 +392,7 @@ function createMainWindow() {
     maxHeight: screenH,
     resizable: false,
     backgroundColor: '#0f0f12',
-    title: 'Audiobook Generator',
+    title: 'Fin Fish Voice',
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
