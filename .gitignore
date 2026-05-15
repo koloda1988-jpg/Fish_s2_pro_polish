@@ -2,6 +2,15 @@
 node_modules/
 package-lock.json
 
+# Build outputs
+dist/
+backend-build/
+backend-dist/
+backend-spec/
+
+# Python virtual environment
+venv/
+
 # Python cache
 __pycache__/
 *.pyc
