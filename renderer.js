@@ -36,6 +36,7 @@
     videoPath: "",
     subtitlePath: "",
     sourceAudioPath: "",
+    sourceAudioMuted: false,
     cues: [],
     selectedIdx: -1,
     running: false,
@@ -258,9 +259,11 @@ const els = {
   voiceoverAutofit: document.getElementById("voiceover-autofit"),
   voiceoverDucking: document.getElementById("voiceover-ducking"),
   voiceoverParse: document.getElementById("voiceover-parse"),
+  voiceoverExtractSubtitles: document.getElementById("voiceover-extract-subtitles"),
   voiceoverGenerate: document.getElementById("voiceover-generate"),
   voiceoverPreview: document.getElementById("voiceover-preview"),
   voiceoverRender: document.getElementById("voiceover-render"),
+  voiceoverToggleAudio: document.getElementById("voiceover-toggle-audio"),
   voiceoverSaveProject: document.getElementById("voiceover-save-project"),
   voiceoverLoadProject: document.getElementById("voiceover-load-project"),
   voiceoverProgress: document.getElementById("voiceover-progress"),
@@ -728,6 +731,19 @@ function closeAiVoiceoverModal() {
   try { els.voiceoverVideo?.pause(); } catch (_) {}
 }
 
+function refreshVoiceoverAudioToggle() {
+  if (!els.voiceoverToggleAudio) return;
+  const hasAudio = Boolean(state.voiceover.sourceAudioPath);
+  els.voiceoverToggleAudio.disabled = !hasAudio;
+  if (!hasAudio) {
+    els.voiceoverToggleAudio.textContent = (typeof t === "function") ? t("ai_video_audio_unavailable") : "No video audio";
+    return;
+  }
+  els.voiceoverToggleAudio.textContent = (typeof t === "function")
+    ? t(state.voiceover.sourceAudioMuted ? "ai_video_audio_off" : "ai_video_audio_on")
+    : (state.voiceover.sourceAudioMuted ? "Video audio: Off" : "Video audio: On");
+}
+
 async function ensureVoiceoverSourceAudio(videoPath) {
   if (!videoPath || !window.api?.py) return;
   const baseDir = state.workdir || videoPath.replace(/[\\/][^\\/]+$/, "");
@@ -743,7 +759,8 @@ async function ensureVoiceoverSourceAudio(videoPath) {
     if (res?.ok && res.audio_path) {
       state.voiceover.sourceAudioPath = String(res.audio_path);
       voiceoverSourceAudio.src = toFileUrl(state.voiceover.sourceAudioPath);
-      if (els.voiceoverVideo) els.voiceoverVideo.muted = true;
+      voiceoverSourceAudio.muted = state.voiceover.sourceAudioMuted;
+      refreshVoiceoverAudioToggle();
       return;
     }
   } catch (err) {
@@ -752,6 +769,7 @@ async function ensureVoiceoverSourceAudio(videoPath) {
 
   state.voiceover.sourceAudioPath = "";
   voiceoverSourceAudio.removeAttribute("src");
+  refreshVoiceoverAudioToggle();
 }
 
 async function hydrateVoiceoverVoices() {
@@ -782,6 +800,8 @@ function updateVoiceoverButtons() {
   }
   if (els.voiceoverRender) els.voiceoverRender.disabled = !(hasCues && state.voiceover.generated > 0 && !state.voiceover.running);
   if (els.voiceoverParse) els.voiceoverParse.disabled = !(hasFiles && !state.voiceover.running);
+  if (els.voiceoverExtractSubtitles) els.voiceoverExtractSubtitles.disabled = !(hasFiles && !state.voiceover.running);
+  refreshVoiceoverAudioToggle();
 }
 
 function renderVoiceoverTimeline() {
@@ -818,16 +838,35 @@ async function parseVoiceoverSubtitles() {
     return;
   }
   try {
-    const useExternalSubtitles = Boolean(state.voiceover.subtitlePath);
-    const res = useExternalSubtitles
-      ? await window.api.py("voiceover_parse_subtitles", { path: state.voiceover.subtitlePath })
-      : await window.api.py("voiceover_transcribe_video", {
-          video_path: state.voiceover.videoPath,
-          workdir: state.workdir,
-        });
+    if (!state.voiceover.subtitlePath) {
+      toast("Choose subtitle file first.", "error");
+      return;
+    }
+    const res = await window.api.py("voiceover_parse_subtitles", { path: state.voiceover.subtitlePath });
 
     state.voiceover.cues = (res?.cues || []).map(c => ({ ...c, offset_ms: 0, status: "pending", audio_path: "", playback_rate: 1.0 }));
-    if (!useExternalSubtitles && res?.subtitle_path) {
+    state.voiceover.generated = 0;
+    state.voiceover.selectedIdx = state.voiceover.cues.length ? 0 : -1;
+    if (els.voiceoverProgress) els.voiceoverProgress.textContent = `0/${state.voiceover.cues.length}`;
+    renderVoiceoverTimeline();
+    toast(`Parsed ${state.voiceover.cues.length} subtitle cues.`, "success");
+  } catch (err) {
+    toast(`Subtitle parse error: ${err.message}`, "error");
+  }
+}
+
+async function extractVoiceoverSubtitlesFromVideo() {
+  if (!state.voiceover.videoPath) {
+    toast("Choose video file first.", "error");
+    return;
+  }
+  try {
+    const res = await window.api.py("voiceover_transcribe_video", {
+      video_path: state.voiceover.videoPath,
+      workdir: state.workdir,
+    });
+    state.voiceover.cues = (res?.cues || []).map(c => ({ ...c, offset_ms: 0, status: "pending", audio_path: "", playback_rate: 1.0 }));
+    if (res?.subtitle_path) {
       state.voiceover.subtitlePath = String(res.subtitle_path);
       if (els.voiceoverSubLabel) els.voiceoverSubLabel.textContent = state.voiceover.subtitlePath.split(/[\\/]/).pop();
     }
@@ -835,15 +874,17 @@ async function parseVoiceoverSubtitles() {
     state.voiceover.selectedIdx = state.voiceover.cues.length ? 0 : -1;
     if (els.voiceoverProgress) els.voiceoverProgress.textContent = `0/${state.voiceover.cues.length}`;
     renderVoiceoverTimeline();
-    toast(
-      useExternalSubtitles
-        ? `Parsed ${state.voiceover.cues.length} subtitle cues.`
-        : `Generated ${state.voiceover.cues.length} subtitle cues from video audio.`,
-      "success"
-    );
+    toast(`Generated ${state.voiceover.cues.length} subtitle cues from video audio.`, "success");
   } catch (err) {
-    toast(`Subtitle parse error: ${err.message}`, "error");
+    toast(`Subtitle extraction error: ${err.message}`, "error");
   }
+}
+
+function toggleVoiceoverSourceAudio() {
+  if (!state.voiceover.sourceAudioPath) return;
+  state.voiceover.sourceAudioMuted = !state.voiceover.sourceAudioMuted;
+  voiceoverSourceAudio.muted = state.voiceover.sourceAudioMuted;
+  refreshVoiceoverAudioToggle();
 }
 
 async function generateVoiceoverCue(cue, idx) {
@@ -2451,9 +2492,11 @@ function attachEvents() {
     updateVoiceoverButtons();
   });
   if (els.voiceoverParse) els.voiceoverParse.addEventListener("click", parseVoiceoverSubtitles);
+  if (els.voiceoverExtractSubtitles) els.voiceoverExtractSubtitles.addEventListener("click", extractVoiceoverSubtitlesFromVideo);
   if (els.voiceoverGenerate) els.voiceoverGenerate.addEventListener("click", generateVoiceoverQueue);
   if (els.voiceoverPreview) els.voiceoverPreview.addEventListener("click", generateVoiceoverPreview);
   if (els.voiceoverRender) els.voiceoverRender.addEventListener("click", fullRenderVoiceover);
+  if (els.voiceoverToggleAudio) els.voiceoverToggleAudio.addEventListener("click", toggleVoiceoverSourceAudio);
   if (els.voiceoverSaveProject) els.voiceoverSaveProject.addEventListener("click", saveVoiceoverProject);
   if (els.voiceoverLoadProject) els.voiceoverLoadProject.addEventListener("click", loadVoiceoverProject);
   if (els.voiceoverTimelineBody) {
@@ -2484,8 +2527,9 @@ function attachEvents() {
     els.voiceoverVideo.addEventListener("loadedmetadata", () => {
       els.voiceoverVideo.muted = true;
       voiceoverSourceAudio.volume = els.voiceoverVideo.volume;
-      voiceoverSourceAudio.muted = els.voiceoverVideo.muted;
+      voiceoverSourceAudio.muted = state.voiceover.sourceAudioMuted;
       voiceoverSourceAudio.playbackRate = els.voiceoverVideo.playbackRate || 1;
+      refreshVoiceoverAudioToggle();
     });
     els.voiceoverVideo.addEventListener("play", async () => {
       if (!state.voiceover.sourceAudioPath) return;
@@ -2506,7 +2550,6 @@ function attachEvents() {
     });
     els.voiceoverVideo.addEventListener("volumechange", () => {
       voiceoverSourceAudio.volume = els.voiceoverVideo.volume;
-      voiceoverSourceAudio.muted = els.voiceoverVideo.muted;
     });
     els.voiceoverVideo.addEventListener("timeupdate", () => {
       const cur = Number.isFinite(els.voiceoverVideo.currentTime) ? els.voiceoverVideo.currentTime : 0;
