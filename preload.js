@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('api', {
   // shell helpers
   openInExplorer: (p) => ipcRenderer.invoke('shell:openFolder', p),
   openWavFile: (p) => ipcRenderer.invoke('shell:openFile', p),
+  readTextFile: (p) => ipcRenderer.invoke('fs:readText', p),
+  writeTextFile: (path, text) => ipcRenderer.invoke('fs:writeText', { path, text }),
 
   // reload renderera (bez restartu serwera TTS)
   reloadApp: () => ipcRenderer.invoke('window:reload'),
@@ -22,6 +24,13 @@ contextBridge.exposeInMainWorld('api', {
 
   // Gemini preparation flow
   prepareBookWithGemini: (payload) => ipcRenderer.invoke('gemini:prepareBook', payload),
+
+  // Audiobook player
+  scanAudiobooks: (payload) => ipcRenderer.invoke('audiobooks:scan', payload),
+
+  // i18n (dynamic language files from languages/*.json)
+  i18nListLanguages: () => ipcRenderer.invoke('i18n:listLanguages'),
+  i18nReadLanguage: (code) => ipcRenderer.invoke('i18n:readLanguage', code),
 
   // Models manager
   getModelsStatus:   (modelKey) => ipcRenderer.invoke('models:getLocalStatus', modelKey),

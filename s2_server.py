@@ -1,39 +1,39 @@
 # -*- coding: utf-8 -*-
 """
-s2_server.py — drop-in zamiennik s2.cpp dla audiobook_app.py.
+s2_server.py — drop-in replacement for s2.cpp used by audiobook_app.py.
 
-Serwer Pythona uruchamiany w venv ComfyUI (Stability Matrix). Laduje s2-pro
-z biblioteki fish_speech, kwantyzuje przez bitsandbytes (NF4 lub INT8), trzyma
-model w VRAM miedzy requestami i wystawia ten sam endpoint co s2.cpp:
+Python server running in the ComfyUI venv (Stability Matrix). Loads s2-pro
+from the fish_speech library, quantises via bitsandbytes (NF4 or INT8), keeps
+the model in VRAM between requests, and exposes the same endpoint as s2.cpp:
 
     POST /generate
     Content-Type: multipart/form-data
     fields:
-        text             (str)   - tekst do syntezy (wymagany)
-        reference_text   (str)   - transkrypt ref audio (opcjonalny, polepsza jakosc)
-        reference_audio  (file)  - WAV referencyjny (opcjonalny, do klonowania glosu)
-        # ponizsze sa opcjonalne; nieobecne -> wartosci domyslne
+        text             (str)   - text to synthesise (required)
+        reference_text   (str)   - reference audio transcript (optional, improves quality)
+        reference_audio  (file)  - reference WAV (optional, for voice cloning)
+        # the following are optional; absent -> defaults
         temperature      (float) - default 0.8
         top_p            (float) - default 0.8
         repetition_penalty (float) - default 1.1
         chunk_length     (int)   - default 200 (100..400)
-        max_new_tokens   (int)   - default 0 (= bez limitu)
-        seed             (int)   - default brak (losowy)
+        max_new_tokens   (int)   - default 0 (= no limit)
+        seed             (int)   - default none (random)
 
-    Zwraca: 200 + audio/wav (PCM_16, sample_rate z modelu, zwykle 44100)
+    Returns: 200 + audio/wav (PCM_16, sample_rate from model, usually 44100)
 
-Konfiguracja przez env vars (lub wartosci domyslne ponizej):
-    S2_MODEL_PATH    - sciezka do checkpointa fishaudio/s2-pro
-                       default: <ten katalog>/models/s2-pro
+Configuration via env vars (or defaults below):
+    S2_MODEL_PATH    - path to the fishaudio/s2-pro checkpoint
+                       default: <this dir>/models/s2-pro
     S2_DEVICE        - cuda / cpu / mps           default: cuda
     S2_BNB_MODE      - nf4 / int8 / none          default: nf4
-    S2_PRECISION     - bfloat16/float16/float32   default: float16 (zalecane przy bnb)
+    S2_PRECISION     - bfloat16/float16/float32   default: float16 (recommended with bnb)
     S2_ATTENTION     - sdpa/sage_attention/flash_attention/auto  default: sdpa
-                       (przy bnb i tak wymuszane sdpa)
+                       (with bnb, sdpa is forced regardless)
     S2_COMPILE       - 0 / 1                      default: 0
-                       (1 = torch.compile, pierwszy request 30-60 s wolniejszy
-                       potem ~10-25 % szybsze; nie dziala na Windows zawsze stabilnie)
-    S2_PORT          - port HTTP                  default: 8080
+                       (1 = torch.compile, first request 30-60 s slower
+                       then ~10-25 % faster; not always stable on Windows)
+    S2_PORT          - HTTP port                  default: 8080
     S2_HOST          - host                       default: 127.0.0.1
 """
 
@@ -64,7 +64,7 @@ import soundfile as sf
 from fastapi import FastAPI, Form, File, UploadFile, HTTPException
 from fastapi.responses import Response, JSONResponse
 
-# ─── Konfiguracja ────────────────────────────────────────────────────────────
+# ─── Configuration ──────────────────────────────────────────────────────────────────────────
 
 THIS_DIR = Path(__file__).resolve().parent
 
@@ -81,11 +81,11 @@ PORT       = int(os.environ.get("S2_PORT", "8080"))
 HOST       = os.environ.get("S2_HOST", "127.0.0.1").strip()
 
 if BNB_MODE in ("none", "off", "no", ""):
-    BNB_MODE = None  # pelna precyzja
+    BNB_MODE = None  # full precision
 
-# ─── Wbudowany fish_speech od ComfyUI node'a (priorytet przed pip-paczka) ───
-# Dzieki temu uruchamiamy DOKLADNIE ten kod, ktorego uzywa Twoj custom node
-# w workflow — czyli brzmienie wyjsciowe jest 1:1.
+# ─── Built-in fish_speech from ComfyUI node (takes priority over pip package) ───
+# This way we run EXACTLY the code used by your custom node in the workflow
+# — meaning the output sound is 1:1.
 NODE_SRC = THIS_DIR / "_node_code" / "fish_speech_src"
 if NODE_SRC.is_dir():
     sys.path.insert(0, str(NODE_SRC))
@@ -102,9 +102,9 @@ logging.getLogger("FishAudioS2").setLevel(logging.INFO)
 
 import torch  # po sys.path, ale przed reszta
 
-# Patch einops: zepsute/bazowe tensorflow stuby w venvie powoduja
-# AttributeError w TensorflowBackend.is_appropriate_type().
-# Nie dotykamy calego get_backend — tylko bezpiecznie zabezpieczamy backend TF.
+# Patch einops: broken/stub tensorflow in the venv causes
+# AttributeError in TensorflowBackend.is_appropriate_type().
+# We only safely guard the TF backend without touching all of get_backend.
 try:
     import einops._backends as _eb
     if hasattr(_eb, "TensorflowBackend"):
@@ -118,7 +118,7 @@ try:
 
         _eb.TensorflowBackend.is_appropriate_type = _safe_tf_is_appropriate
 except Exception as _patch_err:
-    log.warning(f"einops patch nieudany: {_patch_err}")
+    log.warning(f"einops patch failed: {_patch_err}")
 
 DTYPE_MAP = {
     "bfloat16": torch.bfloat16,
@@ -130,16 +130,16 @@ DTYPE_MAP = {
     "fp32":     torch.float32,
 }
 
-# ─── Stan globalny ──────────────────────────────────────────────────────────
+# ─── Global state ────────────────────────────────────────────────────────────────────────
 
 _engine = None             # TTSInferenceEngine
-_engine_lock = threading.Lock()  # serializacja inference (GPU robi po jednym)
-_ref_cache: dict[str, bytes] = {}  # hash -> ref_bytes (tylko zeby nie trzymac duplikatow w pamieci)
-_abort_requested = False   # ustawiane przez POST /abort; zerowane po uzyciu
+_engine_lock = threading.Lock()  # serialise inference (GPU does one at a time)
+_ref_cache: dict[str, bytes] = {}  # hash -> ref_bytes (avoid duplicates in memory)
+_abort_requested = False   # set by POST /abort; cleared after use
 
 
 def _resolve_decoder(model_dir: Path) -> Path:
-    """Znajdz codec.pth w katalogu modelu lub jego rodzicu."""
+    """Find codec.pth in the model directory or its parent."""
     candidates = ["codec.pth",
                   "firefly-gan-vq-fsq-8x1024-21hz-generator.pth",
                   "decoder.pth", "vocoder.pth"]
@@ -149,8 +149,8 @@ def _resolve_decoder(model_dir: Path) -> Path:
             if p.is_file():
                 return p
     raise FileNotFoundError(
-        f"Nie znaleziono codec.pth obok modelu: {model_dir}\n"
-        f"Sprawdzono: {', '.join(candidates)}"
+        f"codec.pth not found alongside model: {model_dir}\n"
+        f"Searched: {', '.join(candidates)}"
     )
 
 
@@ -162,7 +162,7 @@ def _patch_attention(attention: str):
     try:
         from fish_speech.models.text2semantic.llama import Attention, apply_rotary_emb
     except ImportError as e:
-        log.warning(f"Nie mozna patchowac Attention: {e}")
+        log.warning(f"Cannot patch Attention: {e}")
         return None, None
     import torch.nn.functional as F
 
@@ -197,8 +197,8 @@ def _patch_attention(attention: str):
             from sageattention import sageattn
         except ImportError as e:
             log.warning(
-                f"Nie mozna zaladowac sageattention ({e}). "
-                "Triton nie jest dostepny na Windows – uzywam SDPA jako fallback."
+                f"Cannot load sageattention ({e}). "
+                "Triton is not available on Windows – falling back to SDPA."
             )
             forward = _sdpa_forward
             orig = Attention.forward
@@ -233,12 +233,12 @@ def _patch_attention(attention: str):
 
         forward = _sage_forward
     else:
-        log.warning(f"Nieznany backend attention '{attention}', uzywam 'auto'.")
+        log.warning(f"Unknown attention backend '{attention}', using 'auto'.")
         return None, None
 
     original = Attention.forward
     Attention.forward = forward
-    log.info(f"Attention klasa zpatchowana: {attention}")
+    log.info("Attention class patched: %s", attention)
     return original, Attention
 
 
@@ -253,20 +253,20 @@ def _load_engine():
     from fish_speech.inference_engine import TTSInferenceEngine
 
     if DEVICE != "cuda":
-        log.warning("DEVICE=%s — bnb wymaga cuda; jezeli BNB_MODE != None, model "
-                    "moze sie nie zaladowac.", DEVICE)
+        log.warning("DEVICE=%s — bnb requires cuda; if BNB_MODE != None, model "
+                    "may fail to load.", DEVICE)
 
     dtype = DTYPE_MAP.get(PRECISION, torch.float16)
     bnb = BNB_MODE if BNB_MODE in ("nf4", "int8") else None
     attention = ATTENTION
 
     if bnb is not None and attention in ("flash_attention",):
-        log.warning("BNB wymusza attention=sdpa (zamiast %s).", attention)
+        log.warning("BNB forces attention=sdpa (instead of %s).", attention)
         attention = "sdpa"
 
     model_dir = Path(MODEL_PATH).resolve()
     if not model_dir.is_dir():
-        raise FileNotFoundError(f"S2_MODEL_PATH nie istnieje: {model_dir}")
+        raise FileNotFoundError(f"S2_MODEL_PATH does not exist: {model_dir}")
 
     decoder_ckpt = _resolve_decoder(model_dir)
     decoder_device = DECODER_DEVICE_CFG
@@ -279,17 +279,17 @@ def _load_engine():
                 supported = torch.cuda.get_arch_list()
                 if sm_name not in supported:
                     log.warning(
-                        "Wykryto GPU %s; nie jest obslugiwane przez obecny torch (%s). "
-                        "Wymuszam DAC na CPU zeby uniknac 'no kernel image' w codec.",
+                        "Detected GPU %s; not supported by current torch (%s). "
+                        "Forcing DAC to CPU to avoid 'no kernel image' in codec.",
                         sm_name, ", ".join(supported[-3:]),
                     )
                     decoder_device = "cpu"
                 else:
-                    log.info("GPU %s obslugiwane przez torch — DAC bedzie na CUDA.", sm_name)
+                    log.info("GPU %s supported by current torch — DAC will run on CUDA.", sm_name)
             except Exception as e:
-                log.warning("Nie mozna odczytac compute capability GPU: %s", e)
+                log.warning("Cannot read GPU compute capability: %s", e)
 
-    log.info("Konfiguracja:")
+    log.info("Configuration:")
     log.info("  MODEL_PATH = %s", model_dir)
     log.info("  DECODER    = %s", decoder_ckpt)
     log.info("  DEVICE     = %s", DEVICE)
@@ -302,7 +302,7 @@ def _load_engine():
     t0 = time.time()
     orig, cls = _patch_attention(attention)
     try:
-        log.info("Ladowanie LM (worker thread)...")
+        log.info("Loading LM (worker thread)...")
         llama_queue, llama_thread = launch_thread_safe_queue(
             checkpoint_path=str(model_dir),
             device=DEVICE,
@@ -314,9 +314,9 @@ def _load_engine():
     finally:
         if orig is not None and cls is not None:
             cls.forward = orig
-            log.info("Attention przywrocone do default.")
+            log.info("Attention restored to default.")
 
-    log.info("Ladowanie codec'a (DAC)...")
+    log.info("Loading codec (DAC)...")
     decoder_model = load_decoder_model(
         config_name="modded_dac_vq",
         checkpoint_path=str(decoder_ckpt),
@@ -333,7 +333,7 @@ def _load_engine():
     _engine = engine
 
     elapsed = time.time() - t0
-    log.info("Engine gotowy w %.1fs. VRAM stan po starcie:", elapsed)
+    log.info("Engine ready in %.1fs. VRAM usage after init:", elapsed)
     if torch.cuda.is_available():
         a = torch.cuda.memory_allocated() / 1024 / 1024
         r = torch.cuda.memory_reserved() / 1024 / 1024
@@ -348,14 +348,14 @@ app = FastAPI(title="s2_server (fish-speech S2-Pro drop-in)")
 
 @app.on_event("startup")
 def _startup():
-    log.info("Startup: laduje engine fish-speech S2-Pro...")
+    log.info("Startup: loading fish-speech S2-Pro engine...")
     _load_engine()
-    log.info("Startup zakonczony — server gotowy.")
+    log.info("Startup complete — server ready.")
 
 
 @app.get("/")
 def root():
-    """Healthcheck — apka audiobook_app.py uderza GET / aby sprawdzic ze serwer zyje."""
+    """Healthcheck — audiobook_app.py hits GET / to verify the server is alive."""
     if _engine is None:
         return JSONResponse({"status": "loading"}, status_code=503)
     return {"status": "ok",
@@ -388,7 +388,7 @@ async def abort_generation():
     """Przerywa kolejne generowanie (nie biezace). Wywolywane przez przycisk STOP w UI."""
     global _abort_requested
     _abort_requested = True
-    log.info("Abort requested — nastepna generacja zostanie odrzucona.")
+    log.info("Abort requested — next generation will be rejected.")
     return {"status": "abort_queued"}
 
 
@@ -404,41 +404,41 @@ async def generate(
     max_new_tokens: Optional[str] = Form(None),
     seed: Optional[str] = Form(None),
 ):
-    """Glowny endpoint kompatybilny z s2.cpp /generate."""
+    """Main endpoint compatible with s2.cpp /generate."""
     MAX_TEXT_CHARS = 2000
     if not text.strip():
-        raise HTTPException(400, "Pole 'text' nie moze byc puste.")
+        raise HTTPException(400, "Field 'text' cannot be empty.")
     if len(text) > MAX_TEXT_CHARS:
-        raise HTTPException(400, f"Tekst zbyt dlugi ({len(text)} > {MAX_TEXT_CHARS} znakow). "
-                                  "Podziel fragment na krotsze czesci.")
+        raise HTTPException(400, f"Text too long ({len(text)} > {MAX_TEXT_CHARS} chars). "
+                                  "Split the fragment into shorter parts.")
     global _abort_requested
     if _abort_requested:
         _abort_requested = False
-        raise HTTPException(499, "Generacja przerwana przez uzytkownika.")
+        raise HTTPException(499, "Generation cancelled by user.")
     if _engine is None:
-        raise HTTPException(503, "Engine jeszcze sie laduje, sprobuj ponownie za chwile.")
+        raise HTTPException(503, "Engine is still loading, please try again in a moment.")
 
-    # Parametry sampling — uzywamy defaultow jak w workflow ComfyUI.
+    # Sampling parameters — using ComfyUI workflow defaults.
     temp_val   = _parse_optional_float(temperature, 0.8)
     top_p_val  = _parse_optional_float(top_p, 0.8)
     rep_val    = _parse_optional_float(repetition_penalty, 1.1)
     chunk_val  = _parse_optional_int(chunk_length, 512)
     tokens_val = _parse_optional_int(max_new_tokens, 0)
-    seed_val   = _parse_optional_int(seed, 0) or None  # 0/brak → None (losowy)
+    seed_val   = _parse_optional_int(seed, 0) or None  # 0/absent → None (random)
 
-    # Reference audio — odczytujemy bajty (jezeli przyszly).
+    # Reference audio — read bytes (if provided).
     ref_bytes = b""
     if reference_audio is not None:
         ref_bytes = await reference_audio.read()
     if not ref_bytes and reference_text.strip():
-        log.warning("reference_text podane, ale brak reference_audio.")
+        log.warning("reference_text provided but no reference_audio.")
 
-    # Cache po hashu — jednolity glos w calej ksiazce = 1 wpis w pamieci.
+    # Cache by hash — consistent voice throughout the book = 1 entry in memory.
     if ref_bytes:
         h = hashlib.sha256(ref_bytes).hexdigest()
         if h not in _ref_cache:
             _ref_cache[h] = ref_bytes
-            log.info("Nowa referencja w cache (hash=%s..., len=%d B). Wpisow=%d",
+            log.info("New reference in cache (hash=%s..., len=%d B). Entries=%d",
                      h[:8], len(ref_bytes), len(_ref_cache))
         else:
             ref_bytes = _ref_cache[h]  # ten sam obiekt (oszczednosc RAM)
@@ -466,9 +466,9 @@ async def generate(
         format="wav",
     )
 
-    # Inference — globalny lock, GPU robi po jednym. audiobook_app.py i tak
-    # ma Semaphore(1) po stronie klienta, ale tu dla pewnosci.
-    log.info("Generuje (text len=%d, ref=%s, T=%.2f, top_p=%.2f, "
+    # Inference — global lock, GPU does one at a time. audiobook_app.py also
+    # has Semaphore(1) on the client side, but this is a safety net.
+    log.info("Generating (text len=%d, ref=%s, T=%.2f, top_p=%.2f, "
              "rep=%.2f, chunk=%d, tokens=%d, seed=%s)",
              len(text), bool(ref_bytes), temp_val, top_p_val,
              rep_val, chunk_val, tokens_val, seed_val)
@@ -484,11 +484,11 @@ async def generate(
                 if result.code == "final":
                     sample_rate, audio_out = result.audio
         except Exception as e:
-            log.exception("Wyjatek w trakcie inferencji.")
+            log.exception("Exception during inference.")
             raise HTTPException(500, f"Inference exception: {type(e).__name__}: {e}")
 
     if audio_out is None:
-        raise HTTPException(500, "Engine nie zwrocil audio (final == None).")
+        raise HTTPException(500, "Engine returned no audio (final == None).")
 
     # Audio np.ndarray -> WAV PCM_16 in-memory
     audio_np = np.asarray(audio_out)
@@ -512,5 +512,5 @@ async def generate(
 
 if __name__ == "__main__":
     import uvicorn
-    log.info("Uruchamiam s2_server na %s:%d", HOST, PORT)
+    log.info("Starting s2_server on %s:%d", HOST, PORT)
     uvicorn.run(app, host=HOST, port=PORT, workers=1, log_level="info")

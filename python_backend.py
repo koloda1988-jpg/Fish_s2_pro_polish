@@ -41,8 +41,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from urllib.parse import unquote as _url_unquote, urlparse, parse_qs
 
-# Wymuszamy UTF-8 na stdin/stdout - kluczowe dla bundled exe na Windows.
-# PYTHONLEGACYWINDOWSSTDIO blokuje to, dlatego wymuszamy ręcznie.
+# Force UTF-8 on stdin/stdout - critical for bundled exe on Windows.
+# PYTHONLEGACYWINDOWSSTDIO can block this, so we enforce it manually.
 try:
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -70,7 +70,7 @@ except Exception:
 
 
 def emit(obj):
-    """Wysyla JSON na stdout (jedna linia) - zawsze UTF-8."""
+    """Send JSON to stdout (single line) - always UTF-8."""
     try:
         line = json.dumps(obj, ensure_ascii=False, separators=(',', ':'))
         sys.stdout.write(line + '\n')
@@ -87,7 +87,7 @@ def emit_event(name, **kwargs):
 
 
 def split_by_tags(text):
-    """Zwraca liste (is_tag, chunk), zeby nie modyfikowac tresci wewnatrz [tag]."""
+    """Return list (is_tag, chunk) so text inside [tag] is not modified."""
     parts = re.split(r"(\[[^\[\]\n]{1,120}\])", text)
     out = []
     for p in parts:
@@ -119,7 +119,7 @@ def _map_word_case_aware(segment, src_word, dst_word):
 
 def get_backend_base_dir():
     if getattr(sys, "frozen", False):
-        # PyInstaller onefile wypakowuje pliki do _MEIPASS.
+        # PyInstaller onefile extracts files into _MEIPASS.
         return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
     return Path(__file__).resolve().parent
 
@@ -157,7 +157,7 @@ def load_phonetic_map():
 
 PHONETIC_MAP = load_phonetic_map()
 
-# Pre-kompiluj wzorce regex z hard_i_rules raz przy starcie — nie przy kazdym fragmencie
+# Precompile hard_i_rules regex patterns once at startup, not per fragment
 _COMPILED_HARD_RULES: list[tuple[re.Pattern, str]] = [
     (re.compile(rule["pattern"], flags=re.IGNORECASE), rule.get("replacement", ""))
     for rule in (PHONETIC_MAP or {}).get("hard_i_rules", [])
@@ -166,7 +166,7 @@ _COMPILED_HARD_RULES: list[tuple[re.Pattern, str]] = [
 
 
 def normalize_punctuation_segment(segment):
-    # Usuwamy znaki, ktore najczesciej myla model. Zostaja: . , ? ! oraz myslnik.
+    # Remove symbols that most often confuse the model. Keep: . , ? ! and hyphen.
     segment = segment.replace("…", "...")
     segment = re.sub(r"[;:(){}<>/\\|*_~=+@#$%^&\"'`´]", " ", segment)
     segment = re.sub(r"\s+,", ",", segment)
@@ -176,7 +176,7 @@ def normalize_punctuation_segment(segment):
 
 
 def apply_hard_i_rules_segment(segment, rules=None):
-    # Uzywamy pre-skompilowanych wzorcow zamiast kompilowac przy kazdym wywolaniu
+    # Use precompiled patterns instead of recompiling every call
     compiled = _COMPILED_HARD_RULES if rules is None else [
         (re.compile(r["pattern"], flags=re.IGNORECASE), r.get("replacement", ""))
         for r in rules if r.get("pattern")
@@ -216,7 +216,7 @@ def apply_phonetic_corrections(text, options=None):
             seg = normalize_punctuation_segment(seg)
 
         if apply_pause:
-            # Dlugie kropkowe pauzy dostaja tez marker fizycznej ciszy.
+            # Long ellipsis pauses also get a physical silence marker.
             seg = re.sub(r"\.{3,}", " [[SILENCE:1200]] [pause] ", seg)
             seg = re.sub(r"\.\.", " [short pause] ", seg)
             seg = re.sub(r"\.(?=\s|$)", " [short pause] ", seg)
@@ -227,7 +227,7 @@ def apply_phonetic_corrections(text, options=None):
             seg = apply_hard_i_rules_segment(seg)
 
             if use_dot_break:
-                # Eksperymentalnie: rozbijamy si na s.i.
+                # Experimental: split "si" into "s.i".
                 seg = re.sub(r"si(?=[aeiouyąęó])", "s.i", seg, flags=re.IGNORECASE)
 
             if use_zwsp:
@@ -283,7 +283,7 @@ def wav_params(path):
 # ---------- PARSERY ----------
 
 def decode_best_text(data):
-    # Fast path: czysty UTF-8 bez replacement characters
+    # Fast path: clean UTF-8 without replacement characters
     try:
         t = data.decode("utf-8")
         if "\ufffd" not in t:
@@ -307,7 +307,7 @@ def decode_best_text(data):
 
     text = best_text if best_text is not None else data.decode("utf-8", errors="replace")
 
-    # Probujemy naprawic typowe mojibake UTF-8 odczytane jako latin/cp.
+    # Try to repair common UTF-8 mojibake decoded as latin/cp.
     if any(ch in text for ch in ("Ã", "Å", "Ä")):
         try:
             repaired = text.encode("latin1", errors="ignore").decode("utf-8", errors="ignore")
@@ -423,7 +423,7 @@ def read_txt(path):
 
     lines = content.splitlines()
 
-    # Priorytet: jesli sa "CZESC/CZĘŚĆ", pokazujemy tylko czesci.
+    # Priority: if "CZESC/CZĘŚĆ" exists, show only parts.
     parts = parse_sections(lines, part_heading)
     if parts:
         return parts
@@ -432,8 +432,8 @@ def read_txt(path):
     if chapters:
         return chapters
 
-    # Fallback: podzial na sekcje wg naglowkow markdown (# tekst)
-    # np. "# index_split_000.xhtml" z eksportu EPUB→TXT przez Gemini
+    # Fallback: split into sections by markdown headings (# text)
+    # e.g. "# index_split_000.xhtml" from EPUB->TXT export via Gemini
     md_section_re = re.compile(r"^\s*#{1,6}\s+(.+?)\s*$")
     md_sections = []
     cur_title = None
@@ -454,10 +454,10 @@ def read_txt(path):
             _flush_md()
             section_num += 1
             raw_heading = m.group(1).strip()
-            # Jeśli nagłówek to nazwa pliku xhtml (np. index_split_002.xhtml),
-            # nadaj czytelną nazwę "Sekcja N"
+            # If heading is an xhtml filename (e.g. index_split_002.xhtml),
+            # assign readable name "Section N"
             if re.match(r'^[\w_\-]+\.xhtml?$', raw_heading, re.IGNORECASE):
-                cur_title = f"Sekcja {section_num}"
+                cur_title = f"Section {section_num}"
             else:
                 cur_title = raw_heading
             cur_text = []
@@ -470,7 +470,7 @@ def read_txt(path):
     if md_sections:
         return md_sections
 
-    return [{"title": "Cały tekst", "text": content}]
+    return [{"title": "Full text", "text": content}]
 
 
 def read_pdf(path):
@@ -482,7 +482,7 @@ def read_pdf(path):
 
 def _parse_xml_safe(raw_bytes):
     """Parsuje XML, pomijajac BOM i naprawiajac typowe problemy."""
-    # Usun BOM jezeli istnieje
+    # Remove BOM if present
     for bom in (b'\xef\xbb\xbf', b'\xff\xfe', b'\xfe\xff'):
         if raw_bytes.startswith(bom):
             raw_bytes = raw_bytes[len(bom):]
@@ -923,7 +923,7 @@ def _find_ytdlp_cmd():
         if pth and os.path.isfile(pth):
             return [pth]
 
-    # 3) Moduł Pythona
+    # 3) Python module
     test = [sys.executable, "-m", "yt_dlp", "--version"]
     p = _run_cmd(test)
     if p and p.returncode == 0:
@@ -962,12 +962,12 @@ def _youtube_video_only_url(raw_url):
 
 def download_youtube_audio(url, temp_dir):
     if not (url or "").strip():
-        raise ValueError("Podaj link YouTube.")
+        raise ValueError("Provide a YouTube link.")
     os.makedirs(temp_dir, exist_ok=True)
 
     ytdlp = _find_ytdlp_cmd()
     if not ytdlp:
-        raise RuntimeError("Brak yt-dlp. Zainstaluj: pip install yt-dlp")
+        raise RuntimeError("yt-dlp not found. Install: pip install yt-dlp")
 
     out_tpl = os.path.join(temp_dir, "yt_%(id)s.%(ext)s")
     base_args = [
@@ -998,7 +998,7 @@ def download_youtube_audio(url, temp_dir):
             if audio_path and os.path.isfile(audio_path):
                 title = os.path.basename(audio_path)
                 return {"audio_path": audio_path, "title": title}
-            last_err = "Nie udało się ustalić ścieżki pobranego pliku audio."
+            last_err = "Could not determine downloaded audio file path."
             continue
 
         err_blob = (proc.stderr or proc.stdout or "")[-2000:]
@@ -1010,14 +1010,14 @@ def download_youtube_audio(url, temp_dir):
 
     if saw_js_runtime_issue and not js_args:
         raise RuntimeError(
-            "yt-dlp: brak JS runtime dla YouTube. "
-            "Zainstaluj Node.js lub Deno i spróbuj ponownie. "
-            "(YouTube wymaga runtime JS do części materiałów)"
+            "yt-dlp: missing JS runtime for YouTube. "
+            "Install Node.js or Deno and try again. "
+            "(YouTube requires JS runtime for some content)"
         )
     if saw_unavailable:
         raise RuntimeError(
-            "YouTube zwrócił: film niedostępny (private/geo/age/restrykcje). "
-            "Spróbuj innego linku lub zalogowanych cookies w yt-dlp. Szczegóły: " + last_err[-500:]
+            "YouTube returned: video unavailable (private/geo/age/restrictions). "
+            "Try another link or logged-in cookies in yt-dlp. Details: " + last_err[-500:]
         )
     raise RuntimeError("yt-dlp error: " + (last_err or "unknown error")[-800:])
 
@@ -1056,17 +1056,80 @@ def transcribe_audio(audio_path):
         errors.append("openai-whisper: " + str(e))
 
     raise RuntimeError(
-        "Brak działającej transkrypcji (Whisper). "
-        "Zainstaluj np.: pip install faster-whisper yt-dlp. Szczegóły: " + " | ".join(errors[-2:])
+        "No working transcription engine (Whisper). "
+        "Install for example: pip install faster-whisper yt-dlp. Details: " + " | ".join(errors[-2:])
+    )
+
+
+def transcribe_audio_segments(audio_path):
+    model_name = os.environ.get("WHISPER_MODEL", "small")
+    errors = []
+
+    try:
+        from faster_whisper import WhisperModel
+        if _WHISPER_CACHE["engine"] != "faster" or _WHISPER_CACHE["name"] != model_name:
+            try:
+                model = WhisperModel(model_name, device="cuda", compute_type="float16")
+            except Exception:
+                model = WhisperModel(model_name, device="cpu", compute_type="int8")
+            _WHISPER_CACHE.update({"engine": "faster", "model": model, "name": model_name})
+        model = _WHISPER_CACHE["model"]
+        segments, _info = model.transcribe(audio_path, language="pl", beam_size=5, vad_filter=True)
+        cues = []
+        for seg in segments:
+            text = (getattr(seg, "text", "") or "").strip()
+            start = int(round(float(getattr(seg, "start", 0.0) or 0.0) * 1000.0))
+            end = int(round(float(getattr(seg, "end", 0.0) or 0.0) * 1000.0))
+            if not text or end <= start:
+                continue
+            cues.append({
+                "start_ms": start,
+                "end_ms": end,
+                "duration_ms": end - start,
+                "text": text,
+            })
+        if cues:
+            return cues
+    except Exception as e:
+        errors.append("faster-whisper: " + str(e))
+
+    try:
+        import whisper
+        if _WHISPER_CACHE["engine"] != "openai" or _WHISPER_CACHE["name"] != model_name:
+            model = whisper.load_model(model_name)
+            _WHISPER_CACHE.update({"engine": "openai", "model": model, "name": model_name})
+        model = _WHISPER_CACHE["model"]
+        result = model.transcribe(audio_path, language="pl", fp16=False)
+        cues = []
+        for seg in (result.get("segments") or []):
+            text = str(seg.get("text") or "").strip()
+            start = int(round(float(seg.get("start", 0.0) or 0.0) * 1000.0))
+            end = int(round(float(seg.get("end", 0.0) or 0.0) * 1000.0))
+            if not text or end <= start:
+                continue
+            cues.append({
+                "start_ms": start,
+                "end_ms": end,
+                "duration_ms": end - start,
+                "text": text,
+            })
+        if cues:
+            return cues
+    except Exception as e:
+        errors.append("openai-whisper: " + str(e))
+
+    raise RuntimeError(
+        "No working transcription engine (Whisper). "
+        "Install for example: pip install faster-whisper yt-dlp. Details: " + " | ".join(errors[-2:])
     )
 
 
 def create_voice_sample(source_path, start_sec, duration_sec, voice_name, lectors_dir, temp_dir):
     if not os.path.isfile(source_path):
-        raise ValueError("Plik źródłowy nie istnieje: " + source_path)
+        raise ValueError("Source file does not exist: " + source_path)
     safe_name = _sanitize_voice_name(voice_name)
     if not safe_name:
-        raise ValueError("Podaj poprawną nazwę lektora.")
+        raise ValueError("Provide a valid narrator name.")
 
     os.makedirs(lectors_dir, exist_ok=True)
     os.makedirs(temp_dir, exist_ok=True)
@@ -1093,7 +1156,7 @@ def create_voice_sample(source_path, start_sec, duration_sec, voice_name, lector
         raise RuntimeError("ffmpeg clip error: " + (proc.stderr or "")[-800:])
 
     if not os.path.isfile(temp_clip):
-        raise RuntimeError("Nie udało się utworzyć przyciętego pliku WAV.")
+        raise RuntimeError("Failed to create trimmed WAV file.")
 
     transcript = transcribe_audio(temp_clip)
 
@@ -1107,6 +1170,337 @@ def create_voice_sample(source_path, start_sec, duration_sec, voice_name, lector
         "txt_path": final_txt,
         "temp_clip": temp_clip,
         "text": transcript.strip(),
+    }
+
+
+# ---------- AI Voiceover (subtitles -> timed TTS -> video render) ----------
+
+def _parse_tc_to_ms(tc):
+    tc = (tc or "").strip().replace(",", ".")
+    m = re.match(r"^(\d+):(\d{2}):(\d{2})\.(\d{1,3})$", tc)
+    if not m:
+        raise ValueError("Invalid timecode: " + tc)
+    hh = int(m.group(1))
+    mm = int(m.group(2))
+    ss = int(m.group(3))
+    ms_raw = m.group(4)
+    ms = int(ms_raw.ljust(3, "0")[:3])
+    return ((hh * 3600 + mm * 60 + ss) * 1000) + ms
+
+
+def _fmt_ms(ms):
+    ms = int(max(0, ms))
+    hh = ms // 3600000
+    rem = ms % 3600000
+    mm = rem // 60000
+    rem %= 60000
+    ss = rem // 1000
+    mss = rem % 1000
+    return f"{hh:02d}:{mm:02d}:{ss:02d}.{mss:03d}"
+
+
+def parse_subtitles_file(path):
+    raw = Path(path).read_bytes()
+    text = decode_best_text(raw).replace("\r\n", "\n").replace("\r", "\n").strip("\n")
+    lower_name = str(path).lower()
+
+    cues = []
+    if lower_name.endswith(".srt"):
+        blocks = re.split(r"\n\s*\n", text)
+        for block in blocks:
+            lines = [ln.strip("\ufeff") for ln in block.split("\n") if ln.strip()]
+            if len(lines) < 2:
+                continue
+            time_idx = 1 if re.match(r"^\d+$", lines[0]) else 0
+            if time_idx >= len(lines):
+                continue
+            m = re.match(r"^(\d{2}:\d{2}:\d{2}[,\.]\d{1,3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{1,3})", lines[time_idx])
+            if not m:
+                continue
+            start_ms = _parse_tc_to_ms(m.group(1))
+            end_ms = _parse_tc_to_ms(m.group(2))
+            if end_ms <= start_ms:
+                continue
+            cue_text = " ".join(lines[time_idx + 1:]).strip()
+            cue_text = re.sub(r"<[^>]+>", " ", cue_text)
+            cue_text = re.sub(r"\s+", " ", cue_text).strip()
+            if not cue_text:
+                continue
+            cues.append({
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+                "duration_ms": end_ms - start_ms,
+                "text": cue_text,
+            })
+    elif lower_name.endswith(".vtt"):
+        blocks = re.split(r"\n\s*\n", text)
+        for block in blocks:
+            lines = [ln.strip() for ln in block.split("\n") if ln.strip()]
+            if not lines:
+                continue
+            if lines[0].upper().startswith("WEBVTT"):
+                continue
+            time_line = lines[0]
+            if re.match(r"^[A-Za-z0-9_-]+$", lines[0]) and len(lines) > 1:
+                time_line = lines[1]
+                content_lines = lines[2:]
+            else:
+                content_lines = lines[1:]
+            m = re.match(r"^(\d{2}:\d{2}:\d{2}[\.,]\d{1,3})\s*-->\s*(\d{2}:\d{2}:\d{2}[\.,]\d{1,3})", time_line)
+            if not m:
+                continue
+            start_ms = _parse_tc_to_ms(m.group(1))
+            end_ms = _parse_tc_to_ms(m.group(2))
+            if end_ms <= start_ms:
+                continue
+            cue_text = " ".join(content_lines).strip()
+            cue_text = re.sub(r"<[^>]+>", " ", cue_text)
+            cue_text = re.sub(r"\s+", " ", cue_text).strip()
+            if not cue_text:
+                continue
+            cues.append({
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+                "duration_ms": end_ms - start_ms,
+                "text": cue_text,
+            })
+    else:
+        raise ValueError("Supported subtitle formats: .srt, .vtt")
+
+    cues.sort(key=lambda c: (c["start_ms"], c["end_ms"]))
+    for i, c in enumerate(cues, 1):
+        c["idx"] = i
+        c["start_tc"] = _fmt_ms(c["start_ms"])
+        c["end_tc"] = _fmt_ms(c["end_ms"])
+    return cues
+
+
+def _build_atempo_chain(rate):
+    # ffmpeg atempo supports 0.5..2.0 per filter, so chain when needed
+    rate = max(0.5, float(rate))
+    factors = []
+    while rate > 2.0:
+        factors.append(2.0)
+        rate /= 2.0
+    while rate < 0.5:
+        factors.append(0.5)
+        rate /= 0.5
+    factors.append(rate)
+    return ",".join([f"atempo={f:.5f}" for f in factors])
+
+
+def _ffprobe_duration_ms(path):
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        path,
+    ]
+    proc = _run_cmd(cmd)
+    if proc.returncode != 0:
+        return 0
+    try:
+        sec = float((proc.stdout or "0").strip() or "0")
+        return int(round(sec * 1000.0))
+    except Exception:
+        return 0
+
+
+def extract_media_audio(media_path, output_path):
+    if not os.path.isfile(media_path):
+        raise ValueError("Media file not found: " + str(media_path))
+    out_dir = os.path.dirname(output_path) or "."
+    os.makedirs(out_dir, exist_ok=True)
+    proc = _run_cmd([
+        "ffmpeg", "-y",
+        "-i", media_path,
+        "-vn",
+        "-ac", "2",
+        "-ar", "48000",
+        output_path,
+    ])
+    if proc.returncode != 0 or not os.path.isfile(output_path):
+        raise RuntimeError("ffmpeg audio extract error: " + (proc.stderr or proc.stdout or "")[-1200:])
+    return output_path
+
+
+def _write_srt(cues, output_path):
+    lines = []
+    for idx, cue in enumerate(cues, 1):
+        start_tc = _fmt_ms(int(cue.get("start_ms", 0))).replace(".", ",")
+        end_tc = _fmt_ms(int(cue.get("end_ms", 0))).replace(".", ",")
+        text = str(cue.get("text") or "").strip()
+        if not text:
+            continue
+        lines.extend([str(idx), f"{start_tc} --> {end_tc}", text, ""])
+    Path(output_path).write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+    return output_path
+
+
+def transcribe_video_to_subtitles(video_path, workdir=None):
+    if not os.path.isfile(video_path):
+        raise ValueError("Video file not found: " + str(video_path))
+
+    root_dir = workdir or os.path.dirname(video_path) or "."
+    temp_dir = os.path.join(root_dir, "temp_voiceover")
+    os.makedirs(temp_dir, exist_ok=True)
+
+    video_name = Path(video_path).stem
+    audio_path = os.path.join(temp_dir, f"{video_name}_source_audio.wav")
+    subtitle_path = os.path.join(temp_dir, f"{video_name}_auto.srt")
+
+    extract_media_audio(video_path, audio_path)
+    cues = transcribe_audio_segments(audio_path)
+    cues.sort(key=lambda c: (c["start_ms"], c["end_ms"]))
+    for i, cue in enumerate(cues, 1):
+        cue["idx"] = i
+        cue["start_tc"] = _fmt_ms(cue["start_ms"])
+        cue["end_tc"] = _fmt_ms(cue["end_ms"])
+    _write_srt(cues, subtitle_path)
+    return {
+        "ok": True,
+        "subtitle_path": subtitle_path,
+        "audio_path": audio_path,
+        "cues": cues,
+        "count": len(cues),
+    }
+
+
+def _build_tts_command(text, out_abs_path, ref_audio_abs, ref_text_abs):
+    safe = (text or "").replace('"', '`"')
+    return (
+        f'$promptText = Get-Content -Raw -Path "{ref_text_abs}"\n'
+        '.\\s2.exe `\n'
+        '  -m "s2-pro-q8_0.gguf" `\n'
+        '  -t "tokenizer.json" `\n'
+        '  -c 0 `\n'
+        f'  -pa "{ref_audio_abs}" `\n'
+        '  -pt "$promptText" `\n'
+        f'  -text "{safe}" `\n'
+        f'  -o "{out_abs_path}"'
+    )
+
+
+def generate_voiceover_fragment(idx, text, subtitle_duration_ms, workdir, temp_dir, voice_name, auto_fit=True):
+    safe_voice = _sanitize_voice_name(voice_name)
+    if not safe_voice:
+        raise ValueError("Invalid narrator name")
+    ref_audio = os.path.join(workdir, "Lectors", safe_voice + ".wav")
+    ref_text = os.path.join(workdir, "Lectors", safe_voice + ".txt")
+    if not os.path.isfile(ref_audio):
+        raise ValueError("Narrator reference audio not found: " + ref_audio)
+    if not os.path.isfile(ref_text):
+        raise ValueError("Narrator reference text not found: " + ref_text)
+
+    os.makedirs(temp_dir, exist_ok=True)
+    raw_out = os.path.join(temp_dir, f"frag_{int(idx):04d}_raw.wav")
+    fit_out = os.path.join(temp_dir, f"frag_{int(idx):04d}.wav")
+
+    emit_event("voiceover:progress", idx=int(idx), status="processing")
+    cmd = _build_tts_command(text, raw_out, ref_audio, ref_text)
+    rc, _stdout, stderr = run_powershell(cmd, workdir)
+    if rc != 0 or (not os.path.isfile(raw_out)):
+        msg = "TTS error: " + (stderr or "unknown error")[-600:]
+        emit_event("voiceover:progress", idx=int(idx), status="error", message=msg)
+        return {"ok": False, "error": msg}
+
+    audio_ms = int(round(get_wav_duration(raw_out) * 1000.0))
+    target_ms = int(max(1, subtitle_duration_ms or 1))
+    playback_rate = 1.0
+    warning = None
+
+    if auto_fit and audio_ms > target_ms:
+        playback_rate = max(1.0, float(audio_ms) / float(target_ms))
+        atempo = _build_atempo_chain(playback_rate)
+        proc = _run_cmd(["ffmpeg", "-y", "-i", raw_out, "-filter:a", atempo, fit_out])
+        if proc.returncode == 0 and os.path.isfile(fit_out):
+            audio_ms = int(round(get_wav_duration(fit_out) * 1000.0))
+        else:
+            shutil.copyfile(raw_out, fit_out)
+            warning = "Could not auto-fit with ffmpeg; using raw clip"
+    else:
+        shutil.copyfile(raw_out, fit_out)
+
+    if audio_ms > target_ms and not warning:
+        warning = f"Clip longer than subtitle window ({audio_ms}ms > {target_ms}ms)"
+
+    emit_event(
+        "voiceover:progress",
+        idx=int(idx),
+        status="success",
+        audio_path=fit_out,
+        audio_ms=audio_ms,
+        target_ms=target_ms,
+        playback_rate=playback_rate,
+        warning=warning or "",
+    )
+    return {
+        "ok": True,
+        "audio_path": fit_out,
+        "audio_ms": audio_ms,
+        "target_ms": target_ms,
+        "playback_rate": playback_rate,
+        "warning": warning,
+    }
+
+
+def render_voiceover_video(video_path, cues, output_path, ducking_percent=0):
+    from pydub import AudioSegment
+
+    if not os.path.isfile(video_path):
+        raise ValueError("Video file not found: " + str(video_path))
+    if not cues:
+        raise ValueError("No cues to render")
+
+    output_dir = os.path.dirname(output_path) or "."
+    os.makedirs(output_dir, exist_ok=True)
+    temp_dir = os.path.join(output_dir, "temp_voiceover")
+    os.makedirs(temp_dir, exist_ok=True)
+    voice_track = os.path.join(temp_dir, "voiceover_track.wav")
+
+    video_ms = _ffprobe_duration_ms(video_path)
+    if video_ms <= 0:
+        video_ms = max((int(c.get("end_ms", 0)) for c in cues), default=0) + 2000
+
+    timeline = AudioSegment.silent(duration=video_ms)
+    for cue in cues:
+        path = cue.get("audio_path")
+        if not path or not os.path.isfile(path):
+            continue
+        clip = AudioSegment.from_file(path)
+        start_ms = int(cue.get("start_ms", 0)) + int(cue.get("offset_ms", 0))
+        if start_ms < 0:
+            start_ms = 0
+        timeline = timeline.overlay(clip, position=start_ms)
+
+    timeline.export(voice_track, format="wav")
+
+    ducking = max(0, min(100, int(ducking_percent or 0)))
+    base_volume = max(0.0, 1.0 - (ducking / 100.0))
+    if ducking > 0:
+        filter_complex = f"[0:a]volume={base_volume:.3f}[a0];[a0][1:a]amix=inputs=2:duration=first:dropout_transition=0[aout]"
+    else:
+        filter_complex = "[0:a][1:a]amix=inputs=2:duration=first:dropout_transition=0[aout]"
+
+    proc = _run_cmd([
+        "ffmpeg", "-y",
+        "-i", video_path,
+        "-i", voice_track,
+        "-filter_complex", filter_complex,
+        "-map", "0:v",
+        "-map", "[aout]",
+        "-c:v", "copy",
+        "-shortest",
+        output_path,
+    ])
+    if proc.returncode != 0:
+        raise RuntimeError("ffmpeg render error: " + (proc.stderr or proc.stdout or "")[-1200:])
+
+    return {
+        "ok": True,
+        "output_path": output_path,
+        "voice_track": voice_track,
+        "video_duration_ms": video_ms,
     }
 
 
@@ -1408,6 +1802,40 @@ def handle(method, params):
             return {"ok": True, **result}
         except Exception as e:
             return {"ok": False, "error": str(e)}
+    if method == "voiceover_parse_subtitles":
+        cues = parse_subtitles_file(params.get("path", ""))
+        return {"ok": True, "cues": cues, "count": len(cues)}
+    if method == "voiceover_transcribe_video":
+        return transcribe_video_to_subtitles(
+            video_path=params.get("video_path", ""),
+            workdir=params.get("workdir", ""),
+        )
+    if method == "voiceover_extract_video_audio":
+        video_path = params.get("video_path", "")
+        output_path = params.get("output_path", "")
+        if not output_path:
+            base_dir = params.get("workdir", "") or os.path.dirname(video_path) or "."
+            temp_dir = os.path.join(base_dir, "temp_voiceover")
+            os.makedirs(temp_dir, exist_ok=True)
+            output_path = os.path.join(temp_dir, f"{Path(video_path).stem}_preview_audio.wav")
+        return {"ok": True, "audio_path": extract_media_audio(video_path, output_path)}
+    if method == "voiceover_generate_fragment":
+        return generate_voiceover_fragment(
+            idx=int(params.get("idx", 0)),
+            text=params.get("text", ""),
+            subtitle_duration_ms=int(params.get("subtitle_duration_ms", 0)),
+            workdir=params.get("workdir", ""),
+            temp_dir=params.get("temp_dir", "temp_voiceover"),
+            voice_name=params.get("voice_name", ""),
+            auto_fit=bool(params.get("auto_fit", True)),
+        )
+    if method == "voiceover_render_video":
+        return render_voiceover_video(
+            video_path=params.get("video_path", ""),
+            cues=params.get("cues", []),
+            output_path=params.get("output_path", "video_with_voiceover.mp4"),
+            ducking_percent=int(params.get("ducking_percent", 0)),
+        )
     raise ValueError("Unknown method: " + str(method))
 
 

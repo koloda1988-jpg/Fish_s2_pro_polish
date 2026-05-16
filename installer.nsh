@@ -1,69 +1,69 @@
-; installer.nsh — Niestandardowe makra NSIS dla electron-builder
-; electron-builder wstrzykuje te makra do generowanego instalatora.
+; installer.nsh — Custom NSIS macros for electron-builder
+; electron-builder injects these macros into the generated installer.
 ;
-; !macro customInstall  — uruchamiane po skopiowaniu wszystkich plików
-; !macro customUnInstall — uruchamiane podczas deinstalacji
+; !macro customInstall   — runs after all files are copied
+; !macro customUnInstall — runs during uninstall
 
-; ─── Instalacja ─────────────────────────────────────────────────────────────
+; ─── Install ────────────────────────────────────────────────────────────────
 
 !macro customInstall
   SetDetailsPrint both
 
-  ; Katalogi robocze aplikacji (poza resources\)
-  DetailPrint "Tworzenie katalogow roboczych..."
+  ; Application working directories (outside resources\)
+  DetailPrint "Creating working directories..."
   CreateDirectory "$INSTDIR\models\s2-pro"
   CreateDirectory "$INSTDIR\Audiobooks"
   CreateDirectory "$INSTDIR\Files_books"
   CreateDirectory "$INSTDIR\Lectors"
 
-  ; Zapisz sciezke instalacji do rejestru (main.js moze ja odczytac)
+  ; Save install path to registry (main.js can read it)
   WriteRegStr HKCU "Software\AudiobookGenerator" "InstallDir" "$INSTDIR"
 
-  ; Uruchom konfiguracje Python w widocznym oknie konsoli
-  DetailPrint "Konfiguracja srodowiska Python..."
-  DetailPrint "Otworzy sie okno konsoli — nie zamykaj go!"
-  DetailPrint "(Pobieranie PyTorch CUDA moze zajac kilka minut)"
+  ; Run Python environment setup in a visible console window
+  DetailPrint "Configuring Python environment..."
+  DetailPrint "A console window will open - do not close it!"
+  DetailPrint "(Downloading PyTorch CUDA may take a few minutes)"
 
   ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$\"$INSTDIR\resources\setup_python_installer.ps1$\"" -InstallDir "$\"$INSTDIR$\""' $0
 
   ${If} $0 != 0
-    DetailPrint "OSTRZEZENIE: Konfiguracja Python nie powiodla sie (kod: $0)"
+    DetailPrint "WARNING: Python setup failed (code: $0)"
     MessageBox MB_OK|MB_ICONEXCLAMATION \
-      "Srodowisko Python nie zostalo skonfigurowane poprawnie (kod: $0).$\n$\n\
-Mozesz skonfigurowac je recznie po instalacji:$\n\
+      "Python environment was not configured correctly (code: $0).$\n$\n\
+You can configure it manually after installation:$\n\
 $INSTDIR\resources\setup_python_installer.ps1$\n$\n\
-Model TTS nalezy umiescic w:$\n\
+Place the TTS model in:$\n\
 $INSTDIR\models\s2-pro\"
   ${Else}
-    DetailPrint "Srodowisko Python gotowe!"
+    DetailPrint "Python environment ready!"
     MessageBox MB_OK|MB_ICONINFORMATION \
-      "Instalacja zakonczona!$\n$\n\
-Model TTS (Fish Speech S2-Pro) mozna pobrac bezposrednio$\n\
-z poziomu aplikacji — przycisk [Modele] w gornym pasku."
+      "Installation completed!$\n$\n\
+TTS model (Fish Speech S2-Pro) can be downloaded directly$\n\
+from inside the app - [Models] button in the top bar."
   ${EndIf}
 !macroend
 
-; ─── Deinstalacja ──────────────────────────────────────────────────────────
+; ─── Uninstall ──────────────────────────────────────────────────────────────
 
 !macro customUnInstall
-  ; Zapytaj o usuniecie danych uzytkownika
+  ; Ask whether to remove user data
   MessageBox MB_YESNO|MB_ICONQUESTION \
-    "Usunac srodowisko Python (venv) i dane uzytkownika?$\n$\n\
-Ostrzezenie: katalogi Audiobooks\ i Lectors\ zostana usuniete!" \
+    "Remove Python environment (venv) and user data?$\n$\n\
+Warning: Audiobooks\ and Lectors\ directories will be deleted!" \
     IDNO skip_user_data
 
-    DetailPrint "Usuwanie venv..."
+    DetailPrint "Removing venv..."
     RMDir /r "$INSTDIR\venv"
-    DetailPrint "Usuwanie katalogow danych..."
+    DetailPrint "Removing data directories..."
     RMDir /r "$INSTDIR\Audiobooks"
     RMDir /r "$INSTDIR\Files_books"
     RMDir /r "$INSTDIR\Lectors"
 
   skip_user_data:
 
-  ; Zawsze usun klucz rejestru aplikacji
+  ; Always remove app registry key
   DeleteRegKey HKCU "Software\AudiobookGenerator"
 
-  ; Modele zostan — sa za duze i moze uzytkownik chce je zachowac
-  ; Jesli models\ jest pusty po wszystkim — electron-builder i tak usuwa INSTDIR
+  ; Keep models - they are large and user may want to preserve them
+  ; If models\ is empty at the end, electron-builder will remove INSTDIR anyway
 !macroend

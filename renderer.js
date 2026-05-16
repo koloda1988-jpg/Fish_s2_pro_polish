@@ -1,4 +1,4 @@
-const state = {
+﻿const state = {
   bookPath: "",
   bookName: "",
   workdir: document.getElementById("workdir")?.value.trim() || "",
@@ -16,34 +16,66 @@ const state = {
   tagsEnabled: true,
   debugTtsInput: false,
   collapsedChapters: new Set(),
-  handMode: null,  // ustawiane podczas generacji w trybie ręcznym
+  handMode: null,  // set during hand mode generation
+  player: {
+    library: [],
+    bookIndex: -1,
+    sectionIndex: -1,
+    trackIndex: -1,
+    isLoading: false,
+    search: "",
+    shuffle: false,
+    repeatMode: "none",
+    sleepUntil: 0,
+    sleepInterval: null,
+    pendingResumeTime: null,
+    autoResumePlayback: false,
+  },
+  voiceover: {
+    open: false,
+    videoPath: "",
+    subtitlePath: "",
+    sourceAudioPath: "",
+    cues: [],
+    selectedIdx: -1,
+    running: false,
+    generated: 0,
+  },
 };
 
-// Pomocnicze ścieżki — respektują overrides z modalu ustawień
+const playerAudio = new Audio();
+playerAudio.preload = "metadata";
+const voiceoverPreviewAudio = new Audio();
+const voiceoverSourceAudio = new Audio();
+voiceoverSourceAudio.preload = "metadata";
+const PLAYER_STATE_KEY = "ffv_player_state_v1";
+
+// Helper paths — respect overrides from settings modal
 function abRoot() { return state.audiobooksRoot || `${state.workdir}\\Audiobooks`; }
 function fbRoot() { return state.filesbooksRoot || `${state.workdir}\\Files_books`; }
 
-const DEFAULT_PREP_PROMPT = `Rola: Jesteś profesjonalnym reżyserem audiobooków i specjalistą od fonetyki modelu Fish Speech S2 Pro. Twoim zadaniem jest przygotowanie tekstu książki do syntezy mowy.
+const DEFAULT_PREP_PROMPT = `Role: You are a professional audiobook director and phonetics specialist for the Fish Speech S2 Pro model. Your task is to prepare the book text for speech synthesis.
 
-Zadanie:
+Task:
 
-Podział na rozdziały: Zachowaj strukturę książki.
+Chapter split: Preserve the book's structure.
 
-Podział na fragmenty: Każdy rozdział podziel na mniejsze bloki tekstowe. Jeden blok musi trwać maksymalnie 30 sekund (przyjmij średnie tempo czytania: ok. 13-15 znaków na sekundę, czyli ok. 400-450 znaków na fragment).
+Fragment split: Divide each chapter into smaller text blocks. One block must last at most 30 seconds (assume average reading pace: ~13-15 characters per second, i.e. ~400-450 characters per fragment).
 
-Wstrzykiwanie Tagów Emocjonalnych: Przeanalizuj kontekst narracji i dialogów. Wstaw odpowiednie tagi w nawiasach kwadratowych [tag], aby nadać głosowi życie. Używaj tagów takich jak: [whisper], [angry], [sad], [excited tone], [sigh], [inhale], [pause]. Tagi wstawiaj przed zdaniem lub wewnątrz, jeśli następuje zmiana emocji.
+Emotional Tag Injection: Analyze the narration and dialogue context. Insert appropriate tags in square brackets [tag] to bring the voice to life. Use tags such as: [whisper], [angry], [sad], [excited tone], [sigh], [inhale], [pause]. Insert tags before a sentence or inside it when an emotion shift occurs.
 
-Korekta Fonetyczna (Hard-Fix): Model ma problem z polskim "si", "zi", "ci", czytając je zbyt miękko (np. "śilos"). Przeskanuj tekst i zmień zapis problematycznych słów na twardy/fonetyczny:
+Phonetic Hard-Fix: The model has trouble with Polish "si", "zi", "ci", reading them too softly (e.g. "śilos"). Scan the text and change the spelling of problematic words to hard/phonetic:
 
-Wszystkie "Silos" zamień na Sy-los.
+Replace all "Silos" with Sy-los.
 
-Słowa zapożyczone z twardym "si" zapisuj z myślnikiem (np. s-inus, s-ingiel).
+Loan words with a hard "si" write with a hyphen (e.g. s-inus, s-ingiel).
 
-Jeśli zauważysz inne ryzykowne zbitki (np. "Dzieciaki"), zmień na D-zieciaki.`;
+If you notice other risky clusters (e.g. "Dzieciaki"), change to D-zieciaki.`;
 
 const els = {
   backendStatus: document.getElementById("backend-status"),
   btnPrepareBook: document.getElementById("btn-prepare-book"),
+  btnPlayer: document.getElementById("btn-player"),
   btnOpenFolder: document.getElementById("btn-open-folder"),
   bookPath: document.getElementById("book-path"),
   workdir: document.getElementById("workdir"),
@@ -169,11 +201,11 @@ const els = {
   mainFileInput: document.getElementById("main-file-input"),
   mainDropzoneLabel: document.getElementById("main-dropzone-label"),
   btnSaveTtsSettings: document.getElementById("btn-save-tts-settings"),
-  // Guziki przy dropdownie książki
+  // Buttons near the book dropdown
   btnOpenAudiobooks: document.getElementById("btn-open-audiobooks"),
   btnOpenFilesbooks: document.getElementById("btn-open-filesbooks"),
   btnBookSettings:   document.getElementById("btn-book-settings"),
-  // Modal ustawień książki
+  // Book settings modal
   bookSettingsModal:    document.getElementById("book-settings-modal"),
   bsmClose:             document.getElementById("bsm-close"),
   bsmBookName:          document.getElementById("bsm-book-name"),
@@ -186,6 +218,56 @@ const els = {
   btnBsmCancel:         document.getElementById("btn-bsm-cancel"),
   btnBsmSave:           document.getElementById("btn-bsm-save"),
   btnBsmDelete:         document.getElementById("btn-bsm-delete-book"),
+  // Audiobook player
+  playerModal: document.getElementById("player-modal"),
+  playerClose: document.getElementById("player-close"),
+  playerRefresh: document.getElementById("player-refresh"),
+  playerSearch: document.getElementById("player-search"),
+  playerLibrary: document.getElementById("player-library"),
+  playerCover: document.getElementById("player-cover"),
+  playerBookTitle: document.getElementById("player-book-title"),
+  playerSectionTitle: document.getElementById("player-section-title"),
+  playerTrackTitle: document.getElementById("player-track-title"),
+  playerSeek: document.getElementById("player-seek"),
+  playerTimeCurrent: document.getElementById("player-time-current"),
+  playerTimeTotal: document.getElementById("player-time-total"),
+  playerPlay: document.getElementById("player-play"),
+  playerPrev: document.getElementById("player-prev"),
+  playerNext: document.getElementById("player-next"),
+  playerBack15: document.getElementById("player-back-15"),
+  playerFwd15: document.getElementById("player-fwd-15"),
+  playerVolume: document.getElementById("player-volume"),
+  playerSpeed: document.getElementById("player-speed"),
+  playerShuffle: document.getElementById("player-shuffle"),
+  playerRepeat: document.getElementById("player-repeat"),
+  playerSleepMinutes: document.getElementById("player-sleep-minutes"),
+  playerSleepToggle: document.getElementById("player-sleep-toggle"),
+  playerSleepLeft: document.getElementById("player-sleep-left"),
+  // AI Voiceover
+  btnAiVoiceover: document.getElementById("btn-ai-voiceover"),
+  aiVoiceoverModal: document.getElementById("ai-voiceover-modal"),
+  aiVoiceoverClose: document.getElementById("ai-voiceover-close"),
+  voiceoverVideoDrop: document.getElementById("voiceover-video-drop"),
+  voiceoverSubDrop: document.getElementById("voiceover-sub-drop"),
+  voiceoverVideoInput: document.getElementById("voiceover-video-input"),
+  voiceoverSubInput: document.getElementById("voiceover-sub-input"),
+  voiceoverVideoLabel: document.getElementById("voiceover-video-label"),
+  voiceoverSubLabel: document.getElementById("voiceover-sub-label"),
+  voiceoverVoice: document.getElementById("voiceover-voice"),
+  voiceoverWorkers: document.getElementById("voiceover-workers"),
+  voiceoverAutofit: document.getElementById("voiceover-autofit"),
+  voiceoverDucking: document.getElementById("voiceover-ducking"),
+  voiceoverParse: document.getElementById("voiceover-parse"),
+  voiceoverGenerate: document.getElementById("voiceover-generate"),
+  voiceoverPreview: document.getElementById("voiceover-preview"),
+  voiceoverRender: document.getElementById("voiceover-render"),
+  voiceoverSaveProject: document.getElementById("voiceover-save-project"),
+  voiceoverLoadProject: document.getElementById("voiceover-load-project"),
+  voiceoverProgress: document.getElementById("voiceover-progress"),
+  voiceoverVideo: document.getElementById("voiceover-video"),
+  voiceoverVideoSeek: document.getElementById("voiceover-video-seek"),
+  voiceoverVideoTime: document.getElementById("voiceover-video-time"),
+  voiceoverTimelineBody: document.getElementById("voiceover-timeline-body"),
 };
 
 let editingIdx = null;
@@ -205,7 +287,8 @@ function toast(message, type = "info") {
 function formatClock(value) {
   const d = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(d.getTime())) return "-";
-  return d.toLocaleTimeString("pl-PL", {
+  const locale = (typeof getLang === 'function') ? (getLang() === 'en' ? 'en-US' : 'pl-PL') : 'pl-PL';
+  return d.toLocaleTimeString(locale, {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -222,6 +305,774 @@ function formatDuration(seconds) {
     return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+function getCurrentPlayerTrack() {
+  const b = state.player.bookIndex;
+  const s = state.player.sectionIndex;
+  const t = state.player.trackIndex;
+  const book = state.player.library[b];
+  const section = book?.sections?.[s];
+  const track = section?.tracks?.[t];
+  return { book, section, track };
+}
+
+function savePlayerState() {
+  try {
+    const { book, section, track } = getCurrentPlayerTrack();
+    const payload = {
+      bookTitle: book?.title || null,
+      sectionName: section?.name || null,
+      trackName: track?.name || null,
+      currentTime: Number.isFinite(playerAudio.currentTime) ? playerAudio.currentTime : 0,
+      wasPlaying: !playerAudio.paused,
+      volume: Number.isFinite(playerAudio.volume) ? playerAudio.volume : 1,
+      speed: Number.isFinite(playerAudio.playbackRate) ? playerAudio.playbackRate : 1,
+      search: state.player.search || "",
+      shuffle: Boolean(state.player.shuffle),
+      repeatMode: state.player.repeatMode || "none",
+      sleepUntil: state.player.sleepUntil || 0,
+    };
+    localStorage.setItem(PLAYER_STATE_KEY, JSON.stringify(payload));
+  } catch (_) {}
+}
+
+function loadPlayerState() {
+  try {
+    const raw = localStorage.getItem(PLAYER_STATE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (_) {
+    return null;
+  }
+}
+
+function formatSleepLeft(ms) {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const mm = Math.floor(totalSec / 60);
+  const ss = totalSec % 60;
+  return `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+}
+
+function refreshSleepTimerUi() {
+  if (!els.playerSleepToggle || !els.playerSleepLeft) return;
+  if (!state.player.sleepUntil || state.player.sleepUntil <= Date.now()) {
+    els.playerSleepToggle.textContent = (typeof t === "function") ? t("player_start_timer") : "Start timer";
+    els.playerSleepLeft.textContent = (typeof t === "function") ? t("player_sleep_not_active") : "not active";
+    return;
+  }
+  const left = state.player.sleepUntil - Date.now();
+  els.playerSleepToggle.textContent = (typeof t === "function") ? t("player_cancel_timer") : "Cancel timer";
+  els.playerSleepLeft.textContent = (typeof t === "function")
+    ? t("player_sleep_left", { time: formatSleepLeft(left) })
+    : `left ${formatSleepLeft(left)}`;
+}
+
+function clearSleepTimer(save = true) {
+  if (state.player.sleepInterval) {
+    clearInterval(state.player.sleepInterval);
+    state.player.sleepInterval = null;
+  }
+  state.player.sleepUntil = 0;
+  refreshSleepTimerUi();
+  if (save) savePlayerState();
+}
+
+function startSleepTimer(minutes) {
+  const m = Number(minutes) || 0;
+  if (m <= 0) {
+    clearSleepTimer(true);
+    return;
+  }
+  if (state.player.sleepInterval) clearInterval(state.player.sleepInterval);
+  state.player.sleepUntil = Date.now() + (m * 60 * 1000);
+  state.player.sleepInterval = setInterval(() => {
+    const left = state.player.sleepUntil - Date.now();
+    if (left <= 0) {
+      clearSleepTimer(false);
+      pausePlayerTrack();
+      toast((typeof t === "function") ? t("player_sleep_elapsed") : "Sleep timer elapsed. Playback stopped.", "info");
+      savePlayerState();
+      return;
+    }
+    refreshSleepTimerUi();
+  }, 1000);
+  refreshSleepTimerUi();
+  savePlayerState();
+}
+
+function restorePlayerStateFromLibrary() {
+  const stored = loadPlayerState();
+
+  if (stored) {
+    state.player.search = String(stored.search || "");
+    state.player.shuffle = Boolean(stored.shuffle);
+    state.player.repeatMode = ["none", "section", "book"].includes(stored.repeatMode) ? stored.repeatMode : "none";
+    if (els.playerVolume && Number.isFinite(Number(stored.volume))) {
+      els.playerVolume.value = String(Math.min(1, Math.max(0, Number(stored.volume))));
+      playerAudio.volume = Number(els.playerVolume.value);
+    }
+    if (els.playerSpeed && Number.isFinite(Number(stored.speed))) {
+      els.playerSpeed.value = String(Number(stored.speed));
+      playerAudio.playbackRate = Number(els.playerSpeed.value);
+    }
+    if (els.playerSearch) els.playerSearch.value = state.player.search;
+    if (els.playerRepeat) els.playerRepeat.value = state.player.repeatMode;
+
+    if (Number(stored.sleepUntil) > Date.now()) {
+      state.player.sleepUntil = Number(stored.sleepUntil);
+      if (state.player.sleepInterval) clearInterval(state.player.sleepInterval);
+      state.player.sleepInterval = setInterval(() => {
+        const left = state.player.sleepUntil - Date.now();
+        if (left <= 0) {
+          clearSleepTimer(false);
+          pausePlayerTrack();
+          toast((typeof t === "function") ? t("player_sleep_elapsed") : "Sleep timer elapsed. Playback stopped.", "info");
+          savePlayerState();
+          return;
+        }
+        refreshSleepTimerUi();
+      }, 1000);
+    } else {
+      clearSleepTimer(false);
+    }
+  }
+
+  if (els.playerShuffle) {
+    els.playerShuffle.textContent = (typeof t === "function")
+      ? t(state.player.shuffle ? "player_shuffle_on" : "player_shuffle_off")
+      : `🔀 Shuffle: ${state.player.shuffle ? "On" : "Off"}`;
+  }
+  refreshSleepTimerUi();
+
+  const books = state.player.library || [];
+  if (books.length === 0) {
+    state.player.bookIndex = -1;
+    state.player.sectionIndex = -1;
+    state.player.trackIndex = -1;
+    return;
+  }
+
+  if (!stored) {
+    state.player.bookIndex = 0;
+    state.player.sectionIndex = 0;
+    state.player.trackIndex = 0;
+    return;
+  }
+
+  const b = books.findIndex(x => x.title === stored.bookTitle);
+  const bookIndex = b >= 0 ? b : 0;
+  const sections = books[bookIndex]?.sections || [];
+  const s = sections.findIndex(x => x.name === stored.sectionName);
+  const sectionIndex = s >= 0 ? s : 0;
+  const tracks = sections[sectionIndex]?.tracks || [];
+  const t = tracks.findIndex(x => x.name === stored.trackName);
+  const trackIndex = t >= 0 ? t : 0;
+
+  state.player.bookIndex = bookIndex;
+  state.player.sectionIndex = sectionIndex;
+  state.player.trackIndex = trackIndex;
+  state.player.pendingResumeTime = Number.isFinite(Number(stored.currentTime)) ? Number(stored.currentTime) : null;
+  state.player.autoResumePlayback = Boolean(stored.wasPlaying);
+}
+
+function updatePlayerMeta() {
+  const { book, section, track } = getCurrentPlayerTrack();
+  if (els.playerBookTitle) {
+    els.playerBookTitle.textContent = book?.title || ((typeof t === "function") ? t("player_select_book") : "Select a book");
+  }
+  if (els.playerSectionTitle) {
+    const sectionLabel = (typeof t === "function") ? t("player_section_label") : "Section";
+    els.playerSectionTitle.textContent = `${sectionLabel}: ${section?.name || "-"}`;
+  }
+  if (els.playerTrackTitle) {
+    const trackLabel = (typeof t === "function") ? t("player_track_label") : "Track";
+    els.playerTrackTitle.textContent = `${trackLabel}: ${track?.name || "-"}`;
+  }
+  if (els.playerCover) {
+    if (book?.coverUrl) {
+      els.playerCover.src = book.coverUrl;
+      els.playerCover.style.visibility = "visible";
+    } else {
+      els.playerCover.removeAttribute("src");
+      els.playerCover.style.visibility = "hidden";
+    }
+  }
+}
+
+function updatePlayerProgress() {
+  const dur = Number.isFinite(playerAudio.duration) ? playerAudio.duration : 0;
+  const cur = Number.isFinite(playerAudio.currentTime) ? playerAudio.currentTime : 0;
+  const val = dur > 0 ? Math.round((cur / dur) * 1000) : 0;
+  if (els.playerSeek && !els.playerSeek.matches(":active")) {
+    els.playerSeek.value = String(val);
+  }
+  if (els.playerTimeCurrent) els.playerTimeCurrent.textContent = formatDuration(cur);
+  if (els.playerTimeTotal) els.playerTimeTotal.textContent = formatDuration(dur);
+}
+
+function renderPlayerLibrary() {
+  if (!els.playerLibrary) return;
+  const books = state.player.library || [];
+  const q = (state.player.search || "").trim().toLowerCase();
+  const visibleBooks = books
+    .map((book, index) => ({ book, index }))
+    .filter(({ book }) => {
+      if (!q) return true;
+      if ((book.title || "").toLowerCase().includes(q)) return true;
+      return (book.sections || []).some(sec => (sec.name || "").toLowerCase().includes(q));
+    });
+
+  if (books.length === 0) {
+    els.playerLibrary.classList.remove("loading");
+    const msg = (typeof t === "function")
+      ? t("player_no_books_in", { path: escapeHtml(abRoot()) })
+      : `No audiobooks found in ${escapeHtml(abRoot())}`;
+    els.playerLibrary.innerHTML = `<div class="muted small">${msg}</div>`;
+    return;
+  }
+  if (visibleBooks.length === 0) {
+    els.playerLibrary.classList.remove("loading");
+    const msg = (typeof t === "function")
+      ? t("player_no_results_for", { query: escapeHtml(state.player.search) })
+      : `No results for "${escapeHtml(state.player.search)}"`;
+    els.playerLibrary.innerHTML = `<div class="muted small">${msg}</div>`;
+    return;
+  }
+
+  els.playerLibrary.classList.remove("loading");
+  els.playerLibrary.innerHTML = visibleBooks.map(({ book, index: bi }) => {
+    const open = bi === state.player.bookIndex ? " open" : "";
+    const sections = (book.sections || []).map((sec, si) => {
+      const active = (bi === state.player.bookIndex && si === state.player.sectionIndex) ? " active" : "";
+      return `<button class="player-section-item${active}" data-action="player-section" data-book="${bi}" data-section="${si}">${escapeHtml(sec.name)} <span class="muted">(${sec.tracks.length})</span></button>`;
+    }).join("");
+    return `<div class="player-book-item${open}">
+      <div class="player-book-head" data-action="player-book" data-book="${bi}">
+        <img class="player-book-thumb" src="${book.coverUrl || ""}" alt="cover" style="${book.coverUrl ? "" : "visibility:hidden;"}">
+        <div>
+          <div class="player-book-name">${escapeHtml(book.title)}</div>
+          <div class="muted small">${(typeof t === "function") ? t("player_tracks_count", { n: book.totalTracks || 0 }) : `${book.totalTracks || 0} tracks`}</div>
+        </div>
+      </div>
+      <div class="player-book-sections">${sections}</div>
+    </div>`;
+  }).join("");
+}
+
+async function loadPlayerLibrary() {
+  if (!window.api.scanAudiobooks || !els.playerLibrary) return;
+  state.player.isLoading = true;
+  els.playerLibrary.classList.add("loading");
+  els.playerLibrary.innerHTML = `<div class="player-skeleton"></div><div class="player-skeleton"></div><div class="player-skeleton"></div>`;
+  try {
+    const res = await window.api.scanAudiobooks({ root: abRoot() });
+    state.player.library = Array.isArray(res?.books) ? res.books : [];
+    restorePlayerStateFromLibrary();
+    renderPlayerLibrary();
+    updatePlayerMeta();
+    updatePlayerProgress();
+  } catch (err) {
+    els.playerLibrary.classList.remove("loading");
+    const msg = (typeof t === "function")
+      ? t("player_scan_error", { msg: escapeHtml(err.message || String(err)) })
+      : `Player scan error: ${escapeHtml(err.message || String(err))}`;
+    els.playerLibrary.innerHTML = `<div class="small" style="color:#c53030;">${msg}</div>`;
+  } finally {
+    state.player.isLoading = false;
+  }
+}
+
+function selectPlayerSection(bookIndex, sectionIndex) {
+  state.player.bookIndex = bookIndex;
+  state.player.sectionIndex = sectionIndex;
+  state.player.trackIndex = 0;
+  renderPlayerLibrary();
+  updatePlayerMeta();
+  savePlayerState();
+}
+
+async function playCurrentPlayerTrack() {
+  const { track } = getCurrentPlayerTrack();
+  if (!track?.url) return;
+  if (playerAudio.src !== track.url) {
+    playerAudio.src = track.url;
+  }
+  try {
+    await playerAudio.play();
+    if (els.playerPlay) els.playerPlay.textContent = "⏸ Pause";
+    savePlayerState();
+  } catch (err) {
+    toast(`Player error: ${err.message}`, "error");
+  }
+}
+
+function pausePlayerTrack() {
+  playerAudio.pause();
+  if (els.playerPlay) els.playerPlay.textContent = "▶ Play";
+  savePlayerState();
+}
+
+function resolveShuffleTarget() {
+  const { book } = getCurrentPlayerTrack();
+  if (!book) return null;
+  const pool = [];
+  (book.sections || []).forEach((sec, si) => {
+    (sec.tracks || []).forEach((_, ti) => {
+      pool.push({ b: state.player.bookIndex, s: si, t: ti });
+    });
+  });
+  if (pool.length === 0) return null;
+  if (pool.length === 1) return pool[0];
+  const currentKey = `${state.player.bookIndex}:${state.player.sectionIndex}:${state.player.trackIndex}`;
+  const filtered = pool.filter(x => `${x.b}:${x.s}:${x.t}` !== currentKey);
+  return filtered[Math.floor(Math.random() * filtered.length)] || null;
+}
+
+async function stepPlayerTrack(delta) {
+  const { book, section } = getCurrentPlayerTrack();
+  if (!book || !section) return;
+
+  if (delta > 0 && state.player.shuffle) {
+    const target = resolveShuffleTarget();
+    if (!target) return;
+    state.player.bookIndex = target.b;
+    state.player.sectionIndex = target.s;
+    state.player.trackIndex = target.t;
+    renderPlayerLibrary();
+    updatePlayerMeta();
+    savePlayerState();
+    await playCurrentPlayerTrack();
+    return;
+  }
+
+  let b = state.player.bookIndex;
+  let s = state.player.sectionIndex;
+  let t = state.player.trackIndex + delta;
+
+  if (t < 0) {
+    s -= 1;
+    if (s < 0) {
+      b -= 1;
+      if (b < 0) return;
+      s = (state.player.library[b]?.sections?.length || 1) - 1;
+    }
+    t = (state.player.library[b]?.sections?.[s]?.tracks?.length || 1) - 1;
+  }
+
+  const sectionTracks = state.player.library[b]?.sections?.[s]?.tracks || [];
+  if (t >= sectionTracks.length) {
+    if (state.player.repeatMode === "section") {
+      t = 0;
+    } else {
+      s += 1;
+      t = 0;
+      if (s >= (state.player.library[b]?.sections?.length || 0)) {
+        if (state.player.repeatMode === "book") {
+          s = 0;
+          t = 0;
+        } else {
+          b += 1;
+          s = 0;
+          if (b >= state.player.library.length) {
+            pausePlayerTrack();
+            return;
+          }
+        }
+      }
+    }
+  }
+
+  state.player.bookIndex = b;
+  state.player.sectionIndex = s;
+  state.player.trackIndex = t;
+  renderPlayerLibrary();
+  updatePlayerMeta();
+  savePlayerState();
+  await playCurrentPlayerTrack();
+}
+
+function openPlayerModal() {
+  if (!els.playerModal) return;
+  els.playerModal.hidden = false;
+  loadPlayerLibrary();
+}
+
+function closePlayerModal() {
+  if (!els.playerModal) return;
+  els.playerModal.hidden = true;
+  pausePlayerTrack();
+}
+
+function formatMsToClock(ms) {
+  const total = Math.max(0, Math.floor((ms || 0) / 1000));
+  const mm = Math.floor(total / 60);
+  const ss = total % 60;
+  return `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+}
+
+function openAiVoiceoverModal() {
+  if (!els.aiVoiceoverModal) return;
+  els.aiVoiceoverModal.hidden = false;
+  state.voiceover.open = true;
+  hydrateVoiceoverVoices();
+  updateVoiceoverButtons();
+}
+
+function closeAiVoiceoverModal() {
+  if (!els.aiVoiceoverModal) return;
+  els.aiVoiceoverModal.hidden = true;
+  state.voiceover.open = false;
+  try { voiceoverPreviewAudio.pause(); } catch (_) {}
+  try { voiceoverSourceAudio.pause(); } catch (_) {}
+  try { els.voiceoverVideo?.pause(); } catch (_) {}
+}
+
+async function ensureVoiceoverSourceAudio(videoPath) {
+  if (!videoPath || !window.api?.py) return;
+  const baseDir = state.workdir || videoPath.replace(/[\\/][^\\/]+$/, "");
+  const fileName = (videoPath.split(/[\\/]/).pop() || "video").replace(/\.[^.]+$/, "");
+  const targetPath = `${baseDir}\\temp_voiceover\\${fileName}_preview_audio.wav`;
+
+  try {
+    const res = await window.api.py("voiceover_extract_video_audio", {
+      video_path: videoPath,
+      workdir: state.workdir,
+      output_path: targetPath,
+    });
+    if (res?.ok && res.audio_path) {
+      state.voiceover.sourceAudioPath = String(res.audio_path);
+      voiceoverSourceAudio.src = toFileUrl(state.voiceover.sourceAudioPath);
+      if (els.voiceoverVideo) els.voiceoverVideo.muted = true;
+      return;
+    }
+  } catch (err) {
+    console.warn("Voiceover source audio extract failed:", err?.message || err);
+  }
+
+  state.voiceover.sourceAudioPath = "";
+  voiceoverSourceAudio.removeAttribute("src");
+}
+
+async function hydrateVoiceoverVoices() {
+  if (!els.voiceoverVoice) return;
+  try {
+    const result = await window.api.py("list_voices", { voices_dir: voicesDir() });
+    const voices = result?.voices || [];
+    if (!voices.length) {
+      els.voiceoverVoice.innerHTML = `<option value="">No narrators</option>`;
+      return;
+    }
+    els.voiceoverVoice.innerHTML = voices
+      .map(v => `<option value="${escapeHtml(v.name)}">${escapeHtml(v.name)}</option>`)
+      .join("");
+  } catch (err) {
+    els.voiceoverVoice.innerHTML = `<option value="">Error</option>`;
+    toast(`Voice list error: ${err.message}`, "error");
+  }
+}
+
+function updateVoiceoverButtons() {
+  const hasFiles = Boolean(state.voiceover.videoPath);
+  const hasCues = state.voiceover.cues.length > 0;
+  if (els.voiceoverGenerate) els.voiceoverGenerate.disabled = !(hasCues && !state.voiceover.running);
+  if (els.voiceoverPreview) {
+    const sel = state.voiceover.cues[state.voiceover.selectedIdx];
+    els.voiceoverPreview.disabled = !(hasCues && sel && !state.voiceover.running);
+  }
+  if (els.voiceoverRender) els.voiceoverRender.disabled = !(hasCues && state.voiceover.generated > 0 && !state.voiceover.running);
+  if (els.voiceoverParse) els.voiceoverParse.disabled = !(hasFiles && !state.voiceover.running);
+}
+
+function renderVoiceoverTimeline() {
+  if (!els.voiceoverTimelineBody) return;
+  if (!state.voiceover.cues.length) {
+    els.voiceoverTimelineBody.innerHTML = `<div class="small muted">No subtitle cues loaded.</div>`;
+    updateVoiceoverButtons();
+    return;
+  }
+  els.voiceoverTimelineBody.innerHTML = state.voiceover.cues.map((cue, i) => {
+    const cls = i === state.voiceover.selectedIdx ? "voiceover-timeline-row active" : "voiceover-timeline-row";
+    let statusClass = "voiceover-status";
+    if (cue.status === "done") statusClass += " ok";
+    else if (cue.status === "warn") statusClass += " warn";
+    else if (cue.status === "error") statusClass += " err";
+    const rate = cue.playback_rate ? `${Number(cue.playback_rate).toFixed(2)}x` : "-";
+    return `<div class="${cls}" data-action="voiceover-row" data-idx="${i}">
+      <div>${cue.idx || (i + 1)}</div>
+      <div>${escapeHtml(cue.start_tc || formatMsToClock(cue.start_ms))}</div>
+      <div>${escapeHtml(cue.end_tc || formatMsToClock(cue.end_ms))}</div>
+      <div>${Math.round((cue.duration_ms || 0) / 1000)}s</div>
+      <div><input type="number" class="voiceover-offset-input" data-action="voiceover-offset" data-idx="${i}" value="${cue.offset_ms || 0}" step="50"></div>
+      <div>${rate}</div>
+      <div class="${statusClass}">${escapeHtml(cue.status || "pending")}</div>
+      <div class="voiceover-text" title="${escapeHtml(cue.text || "")}">${escapeHtml(cue.text || "")}</div>
+    </div>`;
+  }).join("");
+  updateVoiceoverButtons();
+}
+
+async function parseVoiceoverSubtitles() {
+  if (!state.voiceover.videoPath) {
+    toast("Choose video file first.", "error");
+    return;
+  }
+  try {
+    const useExternalSubtitles = Boolean(state.voiceover.subtitlePath);
+    const res = useExternalSubtitles
+      ? await window.api.py("voiceover_parse_subtitles", { path: state.voiceover.subtitlePath })
+      : await window.api.py("voiceover_transcribe_video", {
+          video_path: state.voiceover.videoPath,
+          workdir: state.workdir,
+        });
+
+    state.voiceover.cues = (res?.cues || []).map(c => ({ ...c, offset_ms: 0, status: "pending", audio_path: "", playback_rate: 1.0 }));
+    if (!useExternalSubtitles && res?.subtitle_path) {
+      state.voiceover.subtitlePath = String(res.subtitle_path);
+      if (els.voiceoverSubLabel) els.voiceoverSubLabel.textContent = state.voiceover.subtitlePath.split(/[\\/]/).pop();
+    }
+    state.voiceover.generated = 0;
+    state.voiceover.selectedIdx = state.voiceover.cues.length ? 0 : -1;
+    if (els.voiceoverProgress) els.voiceoverProgress.textContent = `0/${state.voiceover.cues.length}`;
+    renderVoiceoverTimeline();
+    toast(
+      useExternalSubtitles
+        ? `Parsed ${state.voiceover.cues.length} subtitle cues.`
+        : `Generated ${state.voiceover.cues.length} subtitle cues from video audio.`,
+      "success"
+    );
+  } catch (err) {
+    toast(`Subtitle parse error: ${err.message}`, "error");
+  }
+}
+
+async function generateVoiceoverCue(cue, idx) {
+  const tempDir = `${state.workdir}\\temp_voiceover`;
+  const res = await window.api.py("voiceover_generate_fragment", {
+    idx: cue.idx || (idx + 1),
+    text: cue.text,
+    subtitle_duration_ms: cue.duration_ms,
+    workdir: state.workdir,
+    temp_dir: tempDir,
+    voice_name: els.voiceoverVoice?.value || "",
+    auto_fit: Boolean(els.voiceoverAutofit?.checked),
+  });
+  if (!res?.ok) {
+    cue.status = "error";
+    cue.error = res?.error || "unknown";
+    return false;
+  }
+  cue.audio_path = res.audio_path;
+  cue.audio_ms = res.audio_ms;
+  cue.playback_rate = res.playback_rate || 1.0;
+  cue.status = res.warning ? "warn" : "done";
+  cue.warning = res.warning || "";
+  return true;
+}
+
+async function generateVoiceoverQueue() {
+  if (state.voiceover.running) return;
+  const workers = Math.max(1, Math.min(4, Number(els.voiceoverWorkers?.value || 1)));
+  state.voiceover.running = true;
+  updateVoiceoverButtons();
+
+  const indices = state.voiceover.cues.map((_, i) => i);
+  let cursor = 0;
+  let finished = state.voiceover.cues.filter(c => !!c.audio_path).length;
+  if (els.voiceoverProgress) els.voiceoverProgress.textContent = `${finished}/${state.voiceover.cues.length}`;
+
+  async function workerLoop() {
+    while (cursor < indices.length) {
+      const my = cursor;
+      cursor += 1;
+      const i = indices[my];
+      const cue = state.voiceover.cues[i];
+      cue.status = "processing";
+      renderVoiceoverTimeline();
+      const ok = await generateVoiceoverCue(cue, i);
+      if (!ok) {
+        toast(`Cue #${cue.idx} failed: ${cue.error || cue.warning || "error"}`, "error");
+      }
+      finished += 1;
+      state.voiceover.generated = state.voiceover.cues.filter(c => !!c.audio_path).length;
+      if (els.voiceoverProgress) els.voiceoverProgress.textContent = `${finished}/${state.voiceover.cues.length}`;
+      renderVoiceoverTimeline();
+    }
+  }
+
+  await Promise.all(Array.from({ length: workers }, () => workerLoop()));
+  state.voiceover.running = false;
+  updateVoiceoverButtons();
+  toast(`Voiceover queue finished. Generated ${state.voiceover.generated}/${state.voiceover.cues.length}.`, "success");
+}
+
+async function generateVoiceoverPreview() {
+  const idx = state.voiceover.selectedIdx;
+  if (idx < 0) return;
+  const cue = state.voiceover.cues[idx];
+  if (!cue.audio_path) {
+    cue.status = "processing";
+    renderVoiceoverTimeline();
+    const ok = await generateVoiceoverCue(cue, idx);
+    if (!ok) {
+      renderVoiceoverTimeline();
+      toast(`Preview generation failed: ${cue.error || "error"}`, "error");
+      return;
+    }
+  }
+  try {
+    if (els.voiceoverVideo) {
+      const startMs = Math.max(0, Number(cue.start_ms || 0) + Number(cue.offset_ms || 0));
+      els.voiceoverVideo.currentTime = startMs / 1000;
+      if (state.voiceover.videoPath) {
+        await els.voiceoverVideo.play().catch(() => {});
+      }
+    }
+    voiceoverPreviewAudio.src = toFileUrl(cue.audio_path);
+    voiceoverPreviewAudio.currentTime = 0;
+    await voiceoverPreviewAudio.play();
+  } catch (err) {
+    toast(`Preview error: ${err.message}`, "error");
+  }
+}
+
+async function fullRenderVoiceover() {
+  if (!state.voiceover.videoPath) {
+    toast("Choose video file first.", "error");
+    return;
+  }
+  const cuesReady = state.voiceover.cues.filter(c => !!c.audio_path);
+  if (!cuesReady.length) {
+    toast("Generate voice clips first.", "error");
+    return;
+  }
+  const out = await window.api.saveFile({
+    defaultPath: "video_with_voiceover.mp4",
+    filters: [{ name: "MP4", extensions: ["mp4"] }],
+  });
+  if (!out) return;
+
+  state.voiceover.running = true;
+  updateVoiceoverButtons();
+  try {
+    const res = await window.api.py("voiceover_render_video", {
+      video_path: state.voiceover.videoPath,
+      cues: state.voiceover.cues.map(c => ({
+        idx: c.idx,
+        start_ms: c.start_ms,
+        end_ms: c.end_ms,
+        duration_ms: c.duration_ms,
+        offset_ms: c.offset_ms || 0,
+        audio_path: c.audio_path || "",
+      })),
+      output_path: out,
+      ducking_percent: Number(els.voiceoverDucking?.value || 0),
+    });
+    if (!res?.ok) throw new Error(res?.error || "render failed");
+    toast(`Render done: ${res.output_path}`, "success");
+  } catch (err) {
+    toast(`Render error: ${err.message}`, "error");
+  } finally {
+    state.voiceover.running = false;
+    updateVoiceoverButtons();
+  }
+}
+
+async function saveVoiceoverProject() {
+  if (!state.voiceover.cues.length) {
+    toast("No cues to save. Parse subtitles first.", "error");
+    return;
+  }
+  const out = await window.api.saveFile({
+    defaultPath: "voiceover_project.json",
+    filters: [{ name: "Voiceover Project", extensions: ["json"] }],
+  });
+  if (!out) return;
+
+  const payload = {
+    version: 1,
+    savedAt: new Date().toISOString(),
+    videoPath: state.voiceover.videoPath || "",
+    subtitlePath: state.voiceover.subtitlePath || "",
+    voiceName: els.voiceoverVoice?.value || "",
+    workers: Number(els.voiceoverWorkers?.value || 1),
+    autoFit: Boolean(els.voiceoverAutofit?.checked),
+    duckingPercent: Number(els.voiceoverDucking?.value || 0),
+    selectedIdx: Number(state.voiceover.selectedIdx || 0),
+    cues: state.voiceover.cues,
+  };
+
+  try {
+    const json = JSON.stringify(payload, null, 2);
+    await window.api.writeTextFile(out, json);
+    toast("Project saved.", "success");
+  } catch (err) {
+    toast(`Project save error: ${err.message}`, "error");
+  }
+}
+
+async function loadVoiceoverProject() {
+  const path = await window.api.openFile({
+    filters: [{ name: "Voiceover Project", extensions: ["json"] }],
+  });
+  if (!path) return;
+  try {
+    const txt = await window.api.readTextFile(path);
+    const data = JSON.parse(txt);
+    const cues = Array.isArray(data?.cues) ? data.cues : [];
+    state.voiceover.videoPath = String(data?.videoPath || "");
+    state.voiceover.subtitlePath = String(data?.subtitlePath || "");
+    state.voiceover.cues = cues.map((c, i) => ({
+      idx: Number(c.idx || (i + 1)),
+      start_ms: Number(c.start_ms || 0),
+      end_ms: Number(c.end_ms || 0),
+      duration_ms: Number(c.duration_ms || 0),
+      start_tc: String(c.start_tc || formatMsToClock(Number(c.start_ms || 0))),
+      end_tc: String(c.end_tc || formatMsToClock(Number(c.end_ms || 0))),
+      text: String(c.text || ""),
+      offset_ms: Number(c.offset_ms || 0),
+      status: String(c.status || "pending"),
+      audio_path: String(c.audio_path || ""),
+      playback_rate: Number(c.playback_rate || 1),
+      warning: String(c.warning || ""),
+      error: String(c.error || ""),
+    }));
+    state.voiceover.generated = state.voiceover.cues.filter(c => !!c.audio_path).length;
+    state.voiceover.selectedIdx = Math.max(0, Math.min(Number(data?.selectedIdx || 0), Math.max(0, state.voiceover.cues.length - 1)));
+
+    if (els.voiceoverVideoLabel) {
+      els.voiceoverVideoLabel.textContent = state.voiceover.videoPath ? state.voiceover.videoPath.split(/[\\/]/).pop() : "Drop video here or click to select";
+    }
+    if (els.voiceoverSubLabel) {
+      els.voiceoverSubLabel.textContent = state.voiceover.subtitlePath ? state.voiceover.subtitlePath.split(/[\\/]/).pop() : "Drop subtitles here or click to select";
+    }
+    if (state.voiceover.videoPath && els.voiceoverVideo) {
+      els.voiceoverVideo.src = toFileUrl(state.voiceover.videoPath);
+      ensureVoiceoverSourceAudio(state.voiceover.videoPath);
+    }
+    if (els.voiceoverWorkers && Number.isFinite(Number(data?.workers))) {
+      els.voiceoverWorkers.value = String(Math.max(1, Math.min(4, Number(data.workers))));
+    }
+    if (els.voiceoverAutofit) {
+      els.voiceoverAutofit.checked = Boolean(data?.autoFit);
+    }
+    if (els.voiceoverDucking && Number.isFinite(Number(data?.duckingPercent))) {
+      els.voiceoverDucking.value = String(Math.max(0, Math.min(100, Number(data.duckingPercent))));
+    }
+    if (els.voiceoverVoice && data?.voiceName) {
+      const opt = Array.from(els.voiceoverVoice.options).find(o => o.value === data.voiceName);
+      if (opt) els.voiceoverVoice.value = data.voiceName;
+    }
+
+    if (els.voiceoverProgress) {
+      els.voiceoverProgress.textContent = `${state.voiceover.generated}/${state.voiceover.cues.length}`;
+    }
+    renderVoiceoverTimeline();
+    updateVoiceoverButtons();
+    toast(`Project loaded (${state.voiceover.cues.length} cues).`, "success");
+  } catch (err) {
+    toast(`Project load error: ${err.message}`, "error");
+  }
 }
 
 function estimateSecondsFromText(text) {
@@ -282,10 +1133,10 @@ function updateProgress() {
 }
 
 function statusLabel(status) {
-  if (status === "processing") return "Przetwarzam";
-  if (status === "success") return "Gotowe";
-  if (status === "error") return "Blad";
-  return "Oczekuje";
+  if (status === "processing") return (typeof t === 'function') ? t('status_processing') : 'Przetwarzam';
+  if (status === "success")    return (typeof t === 'function') ? t('status_success')    : 'Gotowe';
+  if (status === "error")      return (typeof t === 'function') ? t('status_error')      : 'Blad';
+  return (typeof t === 'function') ? t('status_pending') : 'Oczekuje';
 }
 
 function wavForIndex(idx) {
@@ -308,7 +1159,7 @@ function renderFragmentRow(f, i) {
     <td class="col-chk"><input type="checkbox" data-action="toggle" data-idx="${i}" ${f.selected ? "checked" : ""}></td>
     <td class="col-nr">${i + 1}</td>
     <td class="col-status">
-      <span class="status-pill" data-status="${status}"${status === 'error' ? ` data-action="show-error" data-idx="${i}" title="Kliknij, aby zobaczyc blad"` : ''}>
+      <span class="status-pill" data-status="${status}"${status === 'error' ? ` data-action="show-error" data-idx="${i}" title="${(typeof t === 'function') ? t('click_see_error') : 'Kliknij, aby zobaczyc blad'}"` : ''}>
         <span class="dot"></span>${statusLabel(status)}
       </span>
     </td>
@@ -316,23 +1167,23 @@ function renderFragmentRow(f, i) {
       <button class="play-btn ${state.activeAudioIdx === i ? "playing" : ""}" data-action="play" data-idx="${i}" ${canPlay ? "" : "disabled"}>${playLabel}</button>
     </td>
     <td class="col-dur">${dur}</td>
-    <td class="col-chars ${charCls}" title="${charCount} znaków">${charCount > 700 ? "⚠ " : ""}${charCount}</td>
+    <td class="col-chars ${charCls}" title="${(typeof t === 'function') ? t('chars_tooltip', {n: charCount}) : charCount + ' chars'}">${charCount > 700 ? "⚠ " : ""}${charCount}</td>
     ${renderTagsCell(f.text)}
     <td class="col-speaker">${escapeHtml(resolveVoiceForFragment(f).label || "Maciej")}</td>
-    <td class="col-text" data-action="edit" data-idx="${i}" title="Kliknij, aby edytowac">${renderTextWithBoldTags(f.text)}</td>
+    <td class="col-text" data-action="edit" data-idx="${i}" title="${(typeof t === 'function') ? t('click_edit') : 'Kliknij, aby edytowac'}">${renderTextWithBoldTags(f.text)}</td>
   </tr>`;
 }
 
 function renderFragments() {
   const data = state.fragments;
-  els.fragCount.textContent = `${data.length} fragmentów`;
+  els.fragCount.textContent = (typeof t === 'function') ? t('frag_count', {n: data.length}) : `${data.length} fragments`;
 
   if (data.length === 0) {
     els.tbody.innerHTML = `
       <tr class="empty-state">
         <td colspan="9">
           <div class="empty-state-content">
-            <p>Brak fragmentow. Wczytaj ksiazke i uruchom podzial.</p>
+            <p>${(typeof t === 'function') ? t('empty_no_frags') : 'No fragments. Load a book and run split.'}</p>
           </div>
         </td>
       </tr>
@@ -343,12 +1194,12 @@ function renderFragments() {
     return;
   }
 
-  // Grupuj wg rozdziału
+  // Group by chapter
   const groupMap = new Map();
   data.forEach((f, i) => {
     const ci = f.chapterIdx !== undefined ? f.chapterIdx : 0;
     if (!groupMap.has(ci)) {
-      groupMap.set(ci, { title: f.chapterTitle || "Sekcja", idx: ci, indices: [] });
+      groupMap.set(ci, { title: f.chapterTitle || "Section", idx: ci, indices: [] });
     }
     groupMap.get(ci).indices.push(i);
   });
@@ -367,9 +1218,9 @@ function renderFragments() {
       html += `<tr class="chapter-header-row${collapsed ? ' collapsed' : ''}" data-chapter="${group.idx}">
         <td colspan="9" class="chapter-header-cell">
           <div class="chapter-header-inner">
-            <input type="checkbox" class="chapter-chk" data-action="toggle-chapter-select" data-chapter="${group.idx}" ${allSelected ? 'checked' : ''} ${someSelected ? 'data-indeterminate="1"' : ''} title="Zaznacz/odznacz cały rozdział">
+            <input type="checkbox" class="chapter-chk" data-action="toggle-chapter-select" data-chapter="${group.idx}" ${allSelected ? 'checked' : ''} ${someSelected ? 'data-indeterminate="1"' : ''} title="Select/deselect entire chapter">
             <span class="chapter-arrow" data-action="toggle-chapter">${collapsed ? '▶' : '▼'}</span>
-            <b data-action="toggle-chapter">Rozdział ${group.idx + 1}</b>
+            <b data-action="toggle-chapter">${(typeof t === 'function') ? t('chapter_n', {n: group.idx + 1}) : 'Chapter ' + (group.idx + 1)}</b>
             <span class="chapter-subtitle muted" data-action="toggle-chapter">${escapeHtml(group.title)}</span>
             <span class="chapter-count muted">${done}/${total}</span>
             <div class="chapter-progress-wrap" data-action="toggle-chapter"><div class="chapter-progress-fill" style="width:${pct}%"></div></div>
@@ -455,7 +1306,7 @@ function closeEditModal() {
   els.editModal.hidden = true;
 }
 
-// ─── Modal: Ustawienia książki ─────────────────────────────────────
+// ─── Modal: Book Settings ──────────────────────────────────────────
 function bookMetaKey() { return `book_meta_${state.subdir || "default"}`; }
 
 function loadBookMeta() {
@@ -489,7 +1340,7 @@ function saveBookSettings() {
   const description = els.bsmDescription.value;
   const notes       = els.bsmNotes.value;
 
-  // Zmiana nazwy książki / subdir
+  // Rename book / subdir
   if (newName && newName !== state.subdir) {
     if (els.subdir) {
       const opt = Array.from(els.subdir.options).find(o => o.value === state.subdir);
@@ -499,38 +1350,38 @@ function saveBookSettings() {
     if (els.subdir) els.subdir.value = newName;
   }
 
-  // Aktualizacja ścieżek
+  // Update paths
   state.audiobooksRoot = newAbRoot;
   state.filesbooksRoot = newFbRoot;
 
-  // Zapis metadanych do localStorage (po ewentualnej zmianie subdir)
+  // Save metadata to localStorage (after possible subdir rename)
   saveBookMeta({ description, notes });
 
-  toast("Ustawienia książki zapisane.", "success");
+  toast("Book settings saved.", "success");
   closeBookSettingsModal();
 }
 
-// Inicjalizacja handlerów modalu ustawień książki (woła attachEvents)
+// Initialize book settings modal handlers (called by attachEvents)
 function attachBookSettingsModalEvents() {
   if (els.bsmClose)             els.bsmClose.addEventListener("click", closeBookSettingsModal);
   if (els.btnBsmCancel)         els.btnBsmCancel.addEventListener("click", closeBookSettingsModal);
   if (els.btnBsmSave)           els.btnBsmSave.addEventListener("click", saveBookSettings);
 
-  // Usun ksiazke (czerwony przycisk w stopce Ustawienia ksiazki)
+  // Delete book (red button in Book Settings footer)
   if (els.btnBsmDelete) {
     els.btnBsmDelete.addEventListener("click", async () => {
       const bookName = (els.bsmBookName?.value || els.subdir?.value || "").trim();
       if (!bookName) {
-        toast("Brak nazwy ksiazki do usuniecia.", "error");
+        toast("No book name to delete.", "error");
         return;
       }
       const confirmed = await customPrompt(
-        "Wpisz nazwe ksiazki '" + bookName + "' zeby potwierdzic usuniecie (nieodwracalne).",
+        "Enter the book name '" + bookName + "' to confirm deletion (irreversible).",
         ""
       );
       if (confirmed === null) return;
       if (confirmed.trim() !== bookName) {
-        toast("Nazwa nie pasuje, anulowano.", "error");
+        toast("Name mismatch, cancelled.", "error");
         return;
       }
       try {
@@ -540,16 +1391,16 @@ function attachBookSettingsModalEvents() {
           book_name: bookName,
         });
         if (res && res.ok) {
-          toast("Usunieto ksiazke: " + bookName, "success");
+          toast("Book deleted: " + bookName, "success");
           if (els.bookSettingsModal) els.bookSettingsModal.hidden = true;
           if (typeof scanAudiobooksSubdirs === "function") {
             await scanAudiobooksSubdirs();
           }
         } else {
-          toast("Blad usuwania: " + (res && res.error ? res.error : "nieznany"), "error");
+          toast("Delete error: " + (res && res.error ? res.error : "unknown"), "error");
         }
       } catch (err) {
-        toast("Blad: " + err.message, "error");
+        toast("Error: " + err.message, "error");
       }
     });
   }
@@ -571,7 +1422,7 @@ function showErrorModal(idx) {
   const frag = state.fragments[idx];
   if (!frag) return;
   els.errorModalIdx.textContent = `#${idx + 1}`;
-  els.errorDetail.textContent = frag.errorMsg || "(brak szczegolów błędu)";
+  els.errorDetail.textContent = frag.errorMsg || "(no error details)";
   els.errorModal.hidden = false;
 }
 
@@ -580,8 +1431,8 @@ function closeErrorModal() {
 }
 
 // ─── Prepare modal state ────────────────────────────────────────────────────
-let prepareInputPath = "";   // ścieżka wybranego pliku wejściowego
-let prepareOutputPath = "";  // opcjonalna pełna ścieżka zapisu (dialog "Zapisz jako")
+let prepareInputPath = "";   // selected input file path
+let prepareOutputPath = "";  // optional full output path ("Save as" dialog)
 
 function prepareChatAppend(text, cls = "") {
   const el = els.prepareChatLog;
@@ -616,7 +1467,7 @@ function voicesDir() {
   return `${state.workdir}\\Lectors`;
 }
 
-// Szuka pliku ksiazki w Files_books pasujacego do nazwy folderu (subdir)
+// Find a book file in Files_books matching the selected folder name (subdir)
 async function autoLoadBookForSubdir(subdir) {
   if (!subdir) return;
   const filesDir = fbRoot();
@@ -625,46 +1476,46 @@ async function autoLoadBookForSubdir(subdir) {
     const files = res?.files || [];
     if (!files.length) return;
 
-    // Dopasowanie: szukaj najlepszego pliku dla nazwy folderu
+    // Matching: find the best file for this folder name
     const subdirLow = subdir.toLowerCase();
     let best = null;
 
-    // 1. Dokładne dopasowanie (stem == subdir)
+    // 1. Exact match (stem == subdir)
     best = files.find(f => f.stem.toLowerCase() === subdirLow);
 
-    // 2. Stem zaczyna się od subdir (np. "Silos" → "Silos_TTS_tagged_v3")
+    // 2. Stem starts with subdir (e.g. "Silos" -> "Silos_TTS_tagged_v3")
     if (!best) best = files.find(f => f.stem.toLowerCase().startsWith(subdirLow));
 
-    // 3. Subdir zaczyna się od stem (np. folder "1. Silos - Hugh Howey" → plik "1. Silos - ...")
+    // 3. Subdir starts with stem (e.g. folder "1. Silos - Hugh Howey" -> file "1. Silos - ...")
     if (!best) best = files.find(f => subdirLow.startsWith(f.stem.toLowerCase()));
 
-    // 4. Stem zawiera subdir lub subdir zawiera stem (luźne)
+    // 4. Stem contains subdir or subdir contains stem (loose match)
     if (!best) best = files.find(f => f.stem.toLowerCase().includes(subdirLow) || subdirLow.includes(f.stem.toLowerCase()));
 
     if (!best) {
-      toast(`Brak pliku książki dla "${subdir}" w Files_books.`, "info");
+      toast(`No book file for "${subdir}" in Files_books.`, "info");
       return;
     }
 
-    toast(`Auto-ładowanie: ${best.name}`, "info");
+    toast(`Auto-loading: ${best.name}`, "info");
     await pickBookFromPath(best.path);
 
-    // pickBookFromPath ustawia state.subdir = stem pliku — przywróć do wybranej pozycji z dropdownu
+    // pickBookFromPath sets state.subdir = file stem; restore selected dropdown value
     if (state.subdir !== subdir) {
-      // Usuń opcję dodaną dla stema pliku jeśli różna od subdir
+      // Remove temporary option added from file stem if different from subdir
       const stemOpt = els.subdir ? Array.from(els.subdir.options).find(o => o.value === state.subdir) : null;
       if (stemOpt && state.subdir !== subdir) stemOpt.remove();
       state.subdir = subdir;
       if (els.subdir) els.subdir.value = subdir;
     }
   } catch (_) {
-    // Files_books nie istnieje lub brak uprawnień — cicho ignoruj
+    // Files_books does not exist or no permissions; ignore silently
   }
 }
 
 function sanitizeFolderName(name) {
-  // Usun znaki niedozwolone w nazwie folderu Windows
-  return (name || "").replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").trim().replace(/[._]+$/, "").trim() || "Rozdzial";
+  // Remove characters not allowed in Windows folder names
+  return (name || "").replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").trim().replace(/[._]+$/, "").trim() || "Chapter";
 }
 
 function openVoiceModal() {
@@ -707,7 +1558,7 @@ function setVoiceSource(path) {
         els.voiceStartSec.value = 0;
       }
       if (els.voiceStartInput) els.voiceStartInput.value = "0";
-      if (els.voiceSourceDuration) els.voiceSourceDuration.textContent = `plik: ${dur.toFixed(1)}s`;
+      if (els.voiceSourceDuration) els.voiceSourceDuration.textContent = `file: ${dur.toFixed(1)}s`;
       updateVoiceStartLabels();
       els.voiceSourcePlayer.removeEventListener("loadedmetadata", onMeta);
     };
@@ -719,13 +1570,13 @@ function setVoiceSource(path) {
 function updateVoiceStartLabels() {
   const start = parseFloat(els.voiceStartSec?.value || 0);
   const dur = parseInt(els.voiceSegDur?.value || 10, 10);
-  if (els.voiceClipEnd) els.voiceClipEnd.textContent = `koniec: ${(start + dur).toFixed(1)}s`;
+  if (els.voiceClipEnd) els.voiceClipEnd.textContent = `end: ${(start + dur).toFixed(1)}s`;
 }
 
 async function splitVoice() {
   const name = (els.voiceName?.value || "").trim();
-  if (!name) { toast("Podaj nazwę lektora.", "error"); return; }
-  if (!voiceSourcePath) { toast("Wybierz plik audio.", "error"); return; }
+  if (!name) { toast("Enter narrator name.", "error"); return; }
+  if (!voiceSourcePath) { toast("Select an audio file.", "error"); return; }
 
   const startSec = parseFloat(els.voiceStartSec?.value || 0);
   const durationSec = parseInt(els.voiceSegDur?.value || 10, 10);
@@ -736,8 +1587,8 @@ async function splitVoice() {
   els.voiceLog.innerHTML = "";
   els.voiceLog.style.display = "flex";
   if (els.voiceSamplesPreview) els.voiceSamplesPreview.style.display = "none";
-  voiceLogAppend(`▶ Źródło: ${voiceSourcePath}`);
-  voiceLogAppend(`  Lektor: ${name}  |  Start: ${startSec.toFixed(1)}s  |  Długość: ${durationSec}s`);
+  voiceLogAppend(`▶ Source: ${voiceSourcePath}`);
+  voiceLogAppend(`  Narrator: ${name}  |  Start: ${startSec.toFixed(1)}s  |  Length: ${durationSec}s`);
 
   try {
     const result = await window.api.py("create_voice_sample", {
@@ -748,17 +1599,17 @@ async function splitVoice() {
       lectors_dir:  lectors,
       temp_dir:     tempDir,
     });
-    if (result.ok === false) throw new Error(result.error || "Błąd backendu");
+    if (result.ok === false) throw new Error(result.error || "Backend error");
     voiceLogAppend(`✅ WAV: ${result.wav_path}`);
     voiceLogAppend(`✅ TXT: ${result.txt_path}`);
-    if (result.text) voiceLogAppend(`🎙 Transkrypcja: ${result.text.slice(0, 120)}…`);
+    if (result.text) voiceLogAppend(`🎙 Transcript: ${result.text.slice(0, 120)}…`);
     const samples = [result.temp_clip, result.wav_path].filter(Boolean);
     renderVoiceSamplesPreview(samples);
     await refreshVoiceList();
-    toast(`Lektor "${name}" zapisany.`, "success");
+    toast(`Narrator "${name}" saved.`, "success");
   } catch (err) {
-    voiceLogAppend(`❌ Błąd: ${err.message}`);
-    toast(`Błąd: ${err.message}`, "error");
+    voiceLogAppend(`❌ Error: ${err.message}`);
+    toast(`Error: ${err.message}`, "error");
   } finally {
     els.voiceSplitBtn.disabled = false;
   }
@@ -774,7 +1625,7 @@ function renderVoiceSamplesPreview(samples) {
   els.voiceSamplesPreview.innerHTML = samples.map((p, i) => {
     const name = p.split(/[\\/]/).pop();
     return `<div class="voice-sample-row">
-      <button class="btn btn-ghost" onclick="playVoiceSample('${p.replace(/\\/g, "\\\\")}')">▶</button>
+      <button class="btn btn-ghost" data-action="preview-play" data-path="${escapeHtml(p)}">▶</button>
       <span>${i + 1}. ${name}</span>
     </div>`;
   }).join("");
@@ -832,66 +1683,66 @@ function renderVoiceList(voices) {
     const escapedSample = en(v.first_sample || "");
     const transcript = v.transcript ? `<div class="voice-card-transcript">${en(v.transcript.slice(0, 140))}…</div>` : "";
     const playBtn = escapedSample
-      ? `<button class="btn btn-ghost voice-play-btn" title="Odtwórz próbkę" data-action="voice-play" data-sample="${escapedSample}">▶</button>`
+      ? `<button class="btn btn-ghost voice-play-btn" title="Play sample" data-action="voice-play" data-sample="${escapedSample}">▶</button>`
       : "";
     return `<div class="voice-card${isActive ? ' voice-card--active' : ''}" data-voice="${escapedName}" data-sample="${escapedSample}">
       <div class="voice-card-header">
         ${playBtn}
         <div class="voice-card-name">${escapedName}${isActive ? ' <span class="voice-active-badge">AKTYWNY</span>' : ""}</div>
       </div>
-      <div class="voice-card-meta">${v.sample_count || 1} próbek · ${en(v.source || "manual/yt")}</div>
+      <div class="voice-card-meta">${v.sample_count || 1} samples · ${en(v.source || "manual/yt")}</div>
       ${transcript}
       <div class="voice-card-actions">
         <button class="btn ${isActive ? 'btn-secondary' : 'btn-primary'}" style="font-size:11px;padding:4px 12px;"
           data-action="voice-activate" data-voice="${escapedName}" data-sample="${escapedSample}">
-          ${isActive ? "✓ Aktywny" : "Ustaw domyślnie"}
+          ${isActive ? "✓ Active" : "Set default"}
         </button>
         <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;"
-          data-action="voice-rename" data-voice="${escapedName}">Zmień nazwę</button>
+          data-action="voice-rename" data-voice="${escapedName}">Rename</button>
         <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;background:rgba(220,38,38,0.15);border-color:rgba(220,38,38,0.4);color:#ff6b6b;"
-          data-action="voice-delete" data-voice="${escapedName}">Usuń</button>
+          data-action="voice-delete" data-voice="${escapedName}">Delete</button>
       </div>
     </div>`;
   }).join("");
 }
 
 async function renameVoicePrompt(name) {
-  const newName = await customPrompt(`Nowa nazwa lektora (było: "${name}"):`, name);
+  const newName = await customPrompt(`New narrator name (was: "${name}")`, name);
   if (!newName || newName.trim() === name || !newName.trim()) return;
   try {
     await window.api.py("rename_voice", { voice_name: name, new_name: newName.trim(), voices_dir: voicesDir() });
-    toast(`Zmieniono: "${name}" → "${newName.trim()}"`, "success");
+    toast(`Renamed: "${name}" → "${newName.trim()}"`, "success");
     refreshVoiceList();
   } catch (err) {
-    toast(`Błąd zmiany nazwy: ${err.message}`, "error");
+    toast(`Rename error: ${err.message}`, "error");
   }
 }
 
 async function activateVoice(name, firstSample) {
-  // Ustaw ref_audio i ref_text na pliki danego lektora
+  // Set ref_audio and ref_text to selected narrator files
   const lectors = voicesDir();
   const wavPath = firstSample || (lectors + "\\" + name + ".wav");
   const txtPath = lectors + "\\" + name + ".txt";
   if (els.serverRefAudio) els.serverRefAudio.value = wavPath;
   if (els.serverRefText)  els.serverRefText.value  = txtPath;
-  toast(`Lektor "${name}" ustawiony jako aktywny.`, "success");
+  toast(`Narrator "${name}" set as active.`, "success");
   renderVoiceList(await (async () => {
     try { const r = await window.api.py("list_voices", { voices_dir: voicesDir() }); return r.voices || []; } catch (_) { return []; }
   })());
 }
 
 async function deleteVoice(name) {
-  if (!confirm(`Usunąć lektora "${name}" i wszystkie jego próbki?`)) return;
+  if (!confirm(`Delete narrator "${name}" and all samples?`)) return;
   try {
     await window.api.py("delete_voice", { voice_name: name, voices_dir: voicesDir() });
-    toast(`Lektor "${name}" usunięty.`, "success");
+    toast(`Narrator "${name}" deleted.`, "success");
     refreshVoiceList();
   } catch (err) {
-    toast(`Błąd usuwania: ${err.message}`, "error");
+    toast(`Delete error: ${err.message}`, "error");
   }
 }
 
-// ─── Custom prompt (Electron blokuje window.prompt) ──────────────────────────
+// ─── Custom prompt (Electron blocks window.prompt) ──────────────────────────
 function customPrompt(message, defaultValue) {
   return new Promise((resolve) => {
     // Lazy create modal at first use
@@ -905,7 +1756,7 @@ function customPrompt(message, defaultValue) {
         <div class="modal-backdrop"></div>
         <div class="modal-window" style="max-width:480px;width:90vw;">
           <div class="modal-header">
-            <h3 id="custom-prompt-title">Podaj wartość</h3>
+            <h3 id="custom-prompt-title">Enter value</h3>
             <button class="btn btn-ghost btn-icon" id="custom-prompt-x">×</button>
           </div>
           <div class="modal-body">
@@ -913,7 +1764,7 @@ function customPrompt(message, defaultValue) {
               background:#1f2330;color:#e8eaed;border:1px solid #2a3148;border-radius:4px;">
           </div>
           <div class="modal-footer">
-            <button class="btn btn-secondary" id="custom-prompt-cancel">Anuluj</button>
+            <button class="btn btn-secondary" id="custom-prompt-cancel">Cancel</button>
             <button class="btn btn-primary" id="custom-prompt-ok">OK</button>
           </div>
         </div>`;
@@ -924,7 +1775,7 @@ function customPrompt(message, defaultValue) {
     const okBtn    = modal.querySelector("#custom-prompt-ok");
     const cancelBtn= modal.querySelector("#custom-prompt-cancel");
     const xBtn     = modal.querySelector("#custom-prompt-x");
-    titleEl.textContent = message || "Podaj wartość";
+    titleEl.textContent = message || "Enter value";
     inputEl.value = defaultValue || "";
     modal.hidden = false;
     setTimeout(() => { inputEl.focus(); inputEl.select(); }, 50);
@@ -952,17 +1803,17 @@ function customPrompt(message, defaultValue) {
 
 
 function openPrepareModal() {
-  // Pozwala otworzyć modal nawet bez załadowanej książki
+  // Allows opening the modal even without a loaded book
   if (!els.preparePrompt.value.trim()) {
     els.preparePrompt.value = DEFAULT_PREP_PROMPT;
   }
-  // Jeżeli mamy bookPath z głównego widoku — pre-fill
+  // If we already have bookPath from main view, pre-fill
   if (state.bookPath && !prepareInputPath) {
     setPrepareInputFile(state.bookPath);
   }
   els.prepareChatLog.style.display = "none";
   els.prepareChatLog.innerHTML = "";
-  if (els.prepareStatusLine) els.prepareStatusLine.textContent = "Gotowy.";
+  if (els.prepareStatusLine) els.prepareStatusLine.textContent = "Ready.";
   els.prepareModal.hidden = false;
 }
 
@@ -978,19 +1829,19 @@ async function runPrepareBook() {
 
   const bookPath = prepareInputPath || state.bookPath || "";
   if (!bookPath) {
-    toast("Wybierz plik wejściowy (PDF/EPUB/TXT).", "error");
+    toast("Select input file (PDF/EPUB/TXT).", "error");
     return;
   }
-  if (!apiKey) { toast("Podaj klucz API Gemini.", "error"); return; }
-  if (!prompt) { toast("Podaj prompt przygotowania książki.", "error"); return; }
+  if (!apiKey) { toast("Enter Gemini API key.", "error"); return; }
+  if (!prompt) { toast("Enter book preparation prompt.", "error"); return; }
 
   els.prepareRun.disabled = true;
-  if (els.prepareStatusLine) els.prepareStatusLine.textContent = "Wysyłam do Gemini…";
+  if (els.prepareStatusLine) els.prepareStatusLine.textContent = "Sending to Gemini...";
   els.prepareChatLog.style.display = "flex";
   els.prepareChatLog.innerHTML = "";
-  prepareChatAppend(`📄 Plik: ${bookPath.split(/[\\/]/).pop()}`, "");
+  prepareChatAppend(`📄 File: ${bookPath.split(/[\\/]/).pop()}`, "");
   prepareChatAppend(`🤖 Model: ${model}`, "");
-  prepareChatAppend(`📤 Wysyłam tekst do Gemini…`, "");
+  prepareChatAppend(`📤 Sending text to Gemini...`, "");
 
   try {
     const result = await window.api.prepareBookWithGemini({
@@ -999,12 +1850,12 @@ async function runPrepareBook() {
     });
 
     const sizeKb = result?.size ? Math.round(result.size / 1024) : "?";
-    prepareChatAppend(`✅ Gotowe! Model: ${result?.model || model}. Plik: ${sizeKb} KB.`, "");
-    prepareChatAppend(`💾 Zapisano: ${result?.outputPath || "?"}`, "");
-    if (els.prepareStatusLine) els.prepareStatusLine.textContent = "Gotowe!";
+    prepareChatAppend(`✅ Done! Model: ${result?.model || model}. File: ${sizeKb} KB.`, "");
+    prepareChatAppend(`💾 Saved: ${result?.outputPath || "?"}`, "");
+    if (els.prepareStatusLine) els.prepareStatusLine.textContent = "Done!";
 
     closePrepareModal();
-    toast(`Gemini otagowało książkę (${sizeKb} KB) — ${result?.model || model}.`, "success");
+    toast(`Gemini tagged book (${sizeKb} KB) — ${result?.model || model}.`, "success");
 
     if (result?.outputPath) {
       state.bookPath = result.outputPath;
@@ -1013,9 +1864,9 @@ async function runPrepareBook() {
       await pickBookFromPath(result.outputPath);
     }
   } catch (err) {
-    prepareChatAppend(`❌ Błąd: ${err.message}`, "");
-    if (els.prepareStatusLine) els.prepareStatusLine.textContent = "Błąd.";
-    toast(`Błąd przygotowania: ${err.message}`, "error");
+    prepareChatAppend(`❌ Error: ${err.message}`, "");
+    if (els.prepareStatusLine) els.prepareStatusLine.textContent = "Error.";
+    toast(`Preparation error: ${err.message}`, "error");
   } finally {
     els.prepareRun.disabled = false;
   }
@@ -1027,16 +1878,16 @@ async function pickBookFromPath(path) {
   state.bookPath = path;
   els.bookPath.value = path;
   els.chapterSelect.disabled = true;
-  els.chapterSelect.innerHTML = "<option>Ladowanie...</option>";
+  els.chapterSelect.innerHTML = "<option>Loading...</option>";
 
   try {
     const data = await window.api.py("load_book", { path });
     state.chapters = data.chapters || [];
 
-    // === Auto-populacja mapy speaker->voice z wykrytych postaci ===
-    // python_backend zwraca data.speakers (sidecar *.speakers.txt lub
-    // ekstrakcja [speaker:Imie] z tekstu). Dla kazdej nowej postaci, ktora
-    // nie ma jeszcze wpisu w textarea — dorzucamy pusta linie "Imie => ".
+    // === Auto-populate speaker->voice map from detected characters ===
+    // python_backend returns data.speakers (sidecar *.speakers.txt or
+    // extraction of [speaker:Name] from text). For each new character that
+    // is missing in textarea, append an empty line "Name => ".
     const detectedSpeakers = Array.isArray(data.speakers) ? data.speakers : [];
     if (detectedSpeakers.length > 0 && els.speakerVoiceMap) {
       const currentMap = parseSpeakerVoiceMapText(els.speakerVoiceMap.value || "");
@@ -1050,15 +1901,15 @@ async function pickBookFromPath(path) {
       if (linesToAdd.length > 0) {
         const sep = (els.speakerVoiceMap.value && !els.speakerVoiceMap.value.endsWith("\n")) ? "\n" : "";
         els.speakerVoiceMap.value = (els.speakerVoiceMap.value || "") + sep + linesToAdd.join("\n");
-        toast("Wykryto " + detectedSpeakers.length + " postaci w ksiazce — przypisz im lektorow w mapie.", "info");
-        // Przebuduj UI karty postać/lektor zeby zobaczyc nowe postacie
+        toast("Detected " + detectedSpeakers.length + " characters — assign narrators in the map.", "info");
+        // Rebuild character/narrator card UI to show new characters
         buildSpeakerVoiceMapUI();
       } else {
-        toast("Wykryto " + detectedSpeakers.length + " postaci — wszystkie sa juz w mapie.", "info");
+        toast("Detected " + detectedSpeakers.length + " characters — all already in the map.", "info");
       }
     }
 
-    // === Auto-utwórz katalog Audiobooks\{nazwa ksiazki} ===
+    // === Auto-create directory Audiobooks\{book_name} ===
     const rawBookName = state.bookPath.split(/[\\/]/).pop().replace(/\.[^.]+$/, "");
     state.bookName = rawBookName;
     const bookSubdir = rawBookName;
@@ -1066,7 +1917,7 @@ async function pickBookFromPath(path) {
     try {
       await window.api.py("ensure_dir", { path: bookDirPath });
     } catch (_) {}
-    // Dodaj do dropdownu jezeli nie istnieje i ustaw aktywny
+    // Add to dropdown if missing and set active
     if (els.subdir) {
       let opt = Array.from(els.subdir.options).find(o => o.value === bookSubdir);
       if (!opt) {
@@ -1080,28 +1931,28 @@ async function pickBookFromPath(path) {
     }
 
     if (state.chapters.length === 0) {
-      els.chapterSelect.innerHTML = "<option>Brak sekcji</option>";
-      toast("Nie znaleziono tresci w pliku.", "error");
+      els.chapterSelect.innerHTML = "<option>No sections</option>";
+      toast("No content found in file.", "error");
     } else {
       const totalFragments = state.chapters.reduce((sum, c) => sum + (c.fragment_count || 0), 0);
-      const allOption = `<option value="all">0. Całość (${totalFragments} fragmentów)</option>`;
+      const allOption = `<option value="all">0. All (${totalFragments} fragments)</option>`;
       const items = state.chapters
         .map((c, i) => {
           const count = c.fragment_count || 0;
-          const label = `${i + 1}. ${escapeHtml(c.title || "Sekcja")} (${count} fragmentów)`;
+          const label = `${i + 1}. ${escapeHtml(c.title || "Section")} (${count} fragments)`;
           return `<option value="${i}">${label}</option>`;
         })
         .join("");
 
       els.chapterSelect.innerHTML = allOption + items;
       els.chapterSelect.disabled = false;
-      // Domyślnie zaznacz "Całość"
+      // Select "All" by default
       els.chapterSelect.options[0].selected = true;
-      toast(`Wczytano ${state.chapters.length} sekcji (${totalFragments} fragmentów).`, "success");
+      toast(`Loaded ${state.chapters.length} sections (${totalFragments} fragments).`, "success");
     }
   } catch (err) {
-    toast(`Błąd wczytywania: ${err.message}`, "error");
-    els.chapterSelect.innerHTML = "<option>Błąd</option>";
+    toast(`Load error: ${err.message}`, "error");
+    els.chapterSelect.innerHTML = "<option>Error</option>";
   }
 
   updateButtonsState();
@@ -1110,8 +1961,8 @@ async function pickBookFromPath(path) {
 async function pickBook() {
   const path = await window.api.openFile({
     filters: [
-      { name: "Ksiazki", extensions: ["epub", "pdf", "txt"] },
-      { name: "Wszystkie", extensions: ["*"] },
+      { name: "Books", extensions: ["epub", "pdf", "txt"] },
+      { name: "All", extensions: ["*"] },
     ],
   });
   await pickBookFromPath(path);
@@ -1119,16 +1970,16 @@ async function pickBook() {
 
 async function loadAndSplit() {
   if (!state.bookPath) {
-    toast("Najpierw wybierz plik.", "error");
+    toast("Select a file first.", "error");
     return;
   }
   const selected = getChapterIndex();
   if (selected.length === 0) {
-    toast("Zaznacz przynajmniej jedną sekcję.", "error");
+    toast("Select at least one section.", "error");
     return;
   }
 
-  // Buduj listę rozdziałów do podziału z zachowaniem indeksów
+  // Build chapter list for splitting while preserving indices
   let chaptersToSplit;
   if (selected.includes("all")) {
     chaptersToSplit = state.chapters.map((c, i) => ({ ...c, _origIdx: i }));
@@ -1137,7 +1988,7 @@ async function loadAndSplit() {
     chaptersToSplit = indices.map(i => ({ ...state.chapters[i], _origIdx: i })).filter(Boolean);
   }
   if (chaptersToSplit.length === 0 || chaptersToSplit.every(c => !(c.text || "").trim())) {
-    toast("Brak tekstu do podziału.", "error");
+    toast("No text to split.", "error");
     return;
   }
 
@@ -1157,7 +2008,7 @@ async function loadAndSplit() {
           wavPath: null,
           audioSeconds: 0,
           estimatedSeconds: estimateSecondsFromText(text),
-          chapterTitle: chapter.title || `Sekcja ${chapter._origIdx + 1}`,
+          chapterTitle: chapter.title || `Section ${chapter._origIdx + 1}`,
           chapterIdx: chapter._origIdx,
         });
       }
@@ -1170,7 +2021,7 @@ async function loadAndSplit() {
     els.statEnd.textContent = "-";
     els.statEta.textContent = "-";
 
-    // Sprawdź gotowe pliki audio
+    // Check existing audio files
     try {
       const scan = await window.api.py("scan_existing_wavs", {
         workdir: state.workdir,
@@ -1188,40 +2039,40 @@ async function loadAndSplit() {
           foundCount++;
         }
       }
-      if (foundCount > 0) toast(`Znaleziono ${foundCount} gotowych fragmentów — odznaczono.`, "success");
+      if (foundCount > 0) toast(`Found ${foundCount} completed fragments — deselected.`, "success");
     } catch (_) {}
 
     renderFragments();
-    const label = selected.includes("all") ? "Całość" : chaptersToSplit.map(c => c.title || "Sekcja").join(" + ");
-    toast(`Podzielono ${label} na ${state.fragments.length} fragmentów.`, "success");
+    const label = selected.includes("all") ? "All" : chaptersToSplit.map(c => c.title || "Section").join(" + ");
+    toast(`Split ${label} into ${state.fragments.length} fragments.`, "success");
   } catch (err) {
-    toast(`Błąd dzielenia: ${err.message}`, "error");
+    toast(`Split error: ${err.message}`, "error");
   }
 }
 
 async function testServer() {
   const url = els.serverUrl.value.trim() || "http://127.0.0.1:8080";
-  els.serverStatusBadge.textContent = "(testuje...)";
+  els.serverStatusBadge.textContent = "(testing...)";
   try {
     const res = await window.api.py("server_ping", { url });
     if (res && res.ok) {
       els.serverStatusBadge.textContent = "(ONLINE)";
       els.serverStatusBadge.style.color = "#10b981";
-      toast("Serwer s2.cpp odpowiada (" + url + ")", "success");
+      toast("s2.cpp server responding (" + url + ")", "success");
     } else {
       els.serverStatusBadge.textContent = "(OFFLINE)";
       els.serverStatusBadge.style.color = "#ef4444";
-      toast("Serwer NIE odpowiada. Uruchom start_server.bat", "error");
+      toast("Server NOT responding. Run start_server.bat", "error");
     }
   } catch (e) {
     els.serverStatusBadge.textContent = "(BLAD)";
     els.serverStatusBadge.style.color = "#ef4444";
-    toast("Test serwera: " + e.message, "error");
+    toast("Server test error: " + e.message, "error");
   }
 }
 
 async function runSelectedServer(selectedIdx, wd, subdir) {
-  // Server-pipeline z multi-voice: grupuje fragmenty wg lektora
+  // Server pipeline with multi-voice: groups fragments by narrator
   const url = els.serverUrl.value.trim();
   const endpoint = els.serverEndpoint.value.trim() || "/v1/audio/speech";
   const gpuWorkers = parseInt(els.serverGpuWorkers.value, 10) || 2;
@@ -1232,13 +2083,13 @@ async function runSelectedServer(selectedIdx, wd, subdir) {
   const chunkLength = parseInt(els.ttsChunkLength.value, 10);
   const maxTokens = parseInt(els.ttsMaxTokens.value, 10);
 
-  // Domyślny głos z pól UI
+  // Default voice from UI fields
   const defaultRefAudio = els.serverRefAudio.value.trim();
   const defaultRefText = els.serverRefText.value.trim();
   const defaultRefAudioPath = defaultRefAudio.includes(":") ? defaultRefAudio : `${wd}\\${defaultRefAudio}`;
   const defaultRefTextPath = defaultRefText.includes(":") ? defaultRefText : `${wd}\\${defaultRefText}`;
 
-  // Grupuj fragmenty wg lektora
+  // Group fragments by narrator
   const groups = new Map(); // key = "refAudio|refText" → {refAudioPath, refTextPath, label, fragments[]}
   for (const idx of selectedIdx) {
     const frag = state.fragments[idx];
@@ -1253,23 +2104,23 @@ async function runSelectedServer(selectedIdx, wd, subdir) {
     if (!groups.has(key)) {
       groups.set(key, { refAudioPath: raPath, refTextPath: rtPath, label: voice.label || "default", fragments: [] });
     }
-    // Ustaw per-fragment subdir: Audiobooks\{ksiazka}\{rozdzial}
-    const chapterFolder = sanitizeFolderName(frag.chapterTitle || `Rozdzial_${(frag.chapterIdx || 0) + 1}`);
+    // Set per-fragment subdir: Audiobooks\{book}\{chapter}
+    const chapterFolder = sanitizeFolderName(frag.chapterTitle || `Chapter_${(frag.chapterIdx || 0) + 1}`);
     const fragSubdir = `Audiobooks\\${state.subdir}\\${chapterFolder}`;
     groups.get(key).fragments.push({ idx: idx + 1, text: frag.text, frag_subdir: fragSubdir });
   }
 
-  // Mapa fileIdx → fragArrayIdx dla progress eventów
+  // Map fileIdx -> fragArrayIdx for progress events
   state.serverIdxMap = {};
   for (const idx of selectedIdx) {
     state.serverIdxMap[idx + 1] = idx;
   }
 
-  toast(`Server pipeline: ${selectedIdx.length} fragmentow, ${groups.size} lektor(ów), GPU: ${gpuWorkers}`, "info");
+  toast(`Server pipeline: ${selectedIdx.length} fragments, ${groups.size} narrator(s), GPU: ${gpuWorkers}`, "info");
 
   for (const [, group] of groups) {
     if (state.stopRequested) break;
-    toast(`Lektor: ${group.label} (${group.fragments.length} fragm.)`, "info");
+    toast(`Narrator: ${group.label} (${group.fragments.length} frags.)`, "info");
     try {
       const res = await window.api.py("server_run_queue", {
         url, endpoint, workdir: wd, subdir,
@@ -1287,10 +2138,10 @@ async function runSelectedServer(selectedIdx, wd, subdir) {
         output_format: "mp3",
       });
       if (res && (res.error || res.ok === false)) {
-        toast("Pipeline blad: " + (res.error || res.reason || "nieznany blad"), "error");
+        toast("Pipeline error: " + (res.error || res.reason || "unknown error"), "error");
       }
     } catch (e) {
-      toast("Pipeline wyjatek: " + e.message, "error");
+      toast("Pipeline exception: " + e.message, "error");
     }
   }
 }
@@ -1302,19 +2153,19 @@ async function runSelected() {
     .filter((x) => x >= 0);
 
   if (selectedIdx.length === 0) {
-    toast("Brak zaznaczonych fragmentow.", "error");
+    toast("No fragments selected.", "error");
     return;
   }
 
-  // ─ Ostrzeżenie przed za długimi fragmentami ──────────────────────────────
+  // ─ Warning for overly long fragments ─────────────────────────────────────
   const CHAR_WARN = 600;
   const tooLong = selectedIdx.filter(i => (state.fragments[i].text || "").length > CHAR_WARN);
   if (tooLong.length > 0) {
-    const lines = tooLong.map(i => `#${i + 1}: ${state.fragments[i].text.length} znaków`).join("\n");
+    const lines = tooLong.map(i => `#${i + 1}: ${state.fragments[i].text.length} chars`).join("\n");
     const ok = confirm(
-      `⚠ Uwaga: ${tooLong.length} zaznaczony fragment(y) jest zbyt długi dla Fish Speech:\n\n${lines}\n\n` +
-      `Fragment >600 znaków może generować się kilka godzin zamiast kilku minut.\n` +
-      `Czy mimo to kontynuować?`
+      `⚠ Warning: ${tooLong.length} selected fragment(s) is too long for Fish Speech:\n\n${lines}\n\n` +
+      `Fragments >600 chars may take several hours instead of a few minutes.\n` +
+      `Continue anyway?`
     );
     if (!ok) return;
   }
@@ -1391,13 +2242,13 @@ async function runSelected() {
   els.statEnd.textContent = formatClock(new Date());
   updateButtonsState();
   updateProgress();
-  toast("Przetwarzanie zakonczone.", "success");
-  // Auto-merge: sprawdź czy kt\u00f3ry\u015b rozdzia\u0142 jest w ca\u0142o\u015bci gotowy
+  toast("Processing complete.", "success");
+  // Auto-merge: check whether any chapter is fully ready
   checkAutoMergeChapters();
 }
 
 async function checkAutoMergeChapters() {
-  // Znajdź wszystkie unikalne chapterIdx
+  // Find all unique chapterIdx values
   const chapters = [...new Set(state.fragments.map(f => f.chapterIdx).filter(x => x !== undefined))];
   for (const chIdx of chapters) {
     const chFrags = state.fragments.filter(f => f.chapterIdx === chIdx);
@@ -1405,19 +2256,19 @@ async function checkAutoMergeChapters() {
     if (!chFrags.every(f => f.status === "success" && f.wavPath)) continue;
     const paths = chFrags.map(f => f.wavPath);
     const bookName = (state.subdir || "audiobook").replace(/[^a-zA-Z0-9_ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/g, "_");
-    const outName = `Rozdzial${chIdx + 1}_${bookName}.mp3`;
+    const outName = `Chapter${chIdx + 1}_${bookName}.mp3`;
     const outPath = `${abRoot()}\\${state.subdir}\\${outName}`;
-    // Sprawdź czy plik już istnieje (avoid double merge)
+    // Check if file already exists (avoid double merge)
     try {
       const ex = await window.api.py("exists", { path: outPath });
       if (ex.exists) continue;
     } catch (_) {}
-    toast(`Scalanie rozdziału ${chIdx + 1} (${chFrags.length} plików)…`, "info");
+    toast(`Merging chapter ${chIdx + 1} (${chFrags.length} files)…`, "info");
     try {
       await window.api.py("merge_wavs", { paths, out_path: outPath });
-      toast(`✅ Rozdział ${chIdx + 1} scalony → ${outName}`, "success");
+      toast(`✅ Chapter ${chIdx + 1} merged → ${outName}`, "success");
     } catch (err) {
-      toast(`Błąd scalania rozdziału ${chIdx + 1}: ${err.message}`, "error");
+      toast(`Chapter ${chIdx + 1} merge error: ${err.message}`, "error");
     }
   }
 }
@@ -1425,21 +2276,21 @@ async function checkAutoMergeChapters() {
 function stopRun() {
   if (!state.running) return;
   state.stopRequested = true;
-  toast("Zatrzymam kolejke po biezacym fragmencie.", "info");
-  // Wyslij abort do s2_server — zapobiegnie uruchomieniu kolejnych fragmentow
+  toast("Queue will stop after current fragment.", "info");
+  // Send abort to s2_server to prevent starting next fragments
   const abortUrl = (els.serverUrl?.value?.trim() || "http://127.0.0.1:8080") + "/abort";
   fetch(abortUrl, { method: "POST" }).catch(() => {});
 }
 
-// ─── Zaznacz N niegotowych ───────────────────────────────────────────────────
+// ─── Select N pending ───────────────────────────────────────────────────────
 function selectNPending() {
   const n = parseInt(els.selectNInput?.value, 10);
-  if (!n || n < 1) { toast("Wpisz liczbę fragmentów do zaznaczenia.", "error"); return; }
+  if (!n || n < 1) { toast("Enter number of fragments to select.", "error"); return; }
 
-  // Odznacz wszystko
+  // Deselect all
   state.fragments.forEach((f) => (f.selected = false));
 
-  // Zaznacz kolejne N które nie są gotowe (status !== "success")
+  // Select next N that are not done (status !== "success")
   let count = 0;
   for (const f of state.fragments) {
     if (count >= n) break;
@@ -1450,31 +2301,31 @@ function selectNPending() {
   }
 
   renderFragments();
-  toast(`Zaznaczono ${count} niegotowych fragmentów (pominięto gotowe).`, "success");
+  toast(`Selected ${count} pending fragments (skipped done).`, "success");
 }
 
-// ─── Podziel zaznaczone ──────────────────────────────────────────────────────
+// ─── Split Selected ─────────────────────────────────────────────────────────
 async function splitSelected() {
-  const TARGET_MAX = 450; // znaków
+  const TARGET_MAX = 450; // chars
   const selectedIdx = state.fragments
     .map((f, i) => (f.selected ? i : -1))
     .filter((x) => x >= 0);
 
   if (selectedIdx.length === 0) {
-    toast("Brak zaznaczonych fragmentow.", "error");
+    toast("No fragments selected.", "error");
     return;
   }
 
   const toLong = selectedIdx.filter(i => (state.fragments[i].text || "").length > TARGET_MAX);
   if (toLong.length === 0) {
-    toast(`Wszystkie zaznaczone fragmenty są ≤${TARGET_MAX} znaków — nic do podziału.`, "info");
+    toast(`All selected fragments are ≤${TARGET_MAX} chars — nothing to split.`, "info");
     return;
   }
 
-  toast(`Dzielę ${toLong.length} za długich fragmentów…`, "info");
+  toast(`Splitting ${toLong.length} long fragments…`, "info");
   let totalAdded = 0;
 
-  // Przetwarzamy od końca żeby indeksy się nie przesunęły
+  // Process from the end so indices do not shift
   for (const origIdx of [...toLong].reverse()) {
     const frag = state.fragments[origIdx];
     try {
@@ -1482,7 +2333,7 @@ async function splitSelected() {
       const parts = res?.fragments || [];
       if (parts.length <= 1) continue;
 
-      // Zachowaj metadane (wavPath, status) tylko na pierwszym kawałku
+      // Keep metadata (wavPath, status) only on the first chunk
       const baseEstimate = frag.estimatedSeconds / parts.length;
       const newFrags = parts.map((text, j) => ({
         text,
@@ -1495,16 +2346,16 @@ async function splitSelected() {
         chapterTitle: frag.chapterTitle,
       }));
 
-      // Podmień oryginalny fragment na listę nowych
+      // Replace original fragment with list of new chunks
       state.fragments.splice(origIdx, 1, ...newFrags);
       totalAdded += parts.length - 1;
     } catch (e) {
-      toast(`Błąd podziału fragmentu #${origIdx + 1}: ${e.message}`, "error");
+      toast(`Split error for fragment #${origIdx + 1}: ${e.message}`, "error");
     }
   }
 
   if (totalAdded > 0) {
-    toast(`Podzielono — dodano ${totalAdded} nowych fragmentów.`, "success");
+    toast(`Split — added ${totalAdded} new fragments.`, "success");
     renderFragments();
   }
 }
@@ -1515,7 +2366,7 @@ async function mergeSelection(onlySelected) {
     .filter((f) => (onlySelected ? f.selected : true));
 
   if (targets.length === 0) {
-    toast("Brak fragmentow do scalenia.", "error");
+    toast("No fragments to merge.", "error");
     return;
   }
 
@@ -1538,7 +2389,7 @@ async function mergeSelection(onlySelected) {
   }
 
   if (paths.length === 0) {
-    toast("Nie znaleziono zadnych WAV-ow.", "error");
+    toast("No WAV files found.", "error");
     return;
   }
 
@@ -1550,16 +2401,260 @@ async function mergeSelection(onlySelected) {
 
   try {
     await window.api.py("merge_wavs", { paths, out_path: outPath });
-    toast("Scalono pliki WAV.", "success");
+    toast("WAV files merged.", "success");
     await window.api.openWavFile(outPath);
   } catch (err) {
-    toast(`Blad scalania: ${err.message}`, "error");
+    toast(`Merge error: ${err.message}`, "error");
   }
 }
 
 function attachEvents() {
   els.btnPickBook.addEventListener("click", pickBook);
   els.btnPrepareBook.addEventListener("click", openPrepareModal);
+
+  if (els.btnAiVoiceover) els.btnAiVoiceover.addEventListener("click", openAiVoiceoverModal);
+  if (els.aiVoiceoverClose) els.aiVoiceoverClose.addEventListener("click", closeAiVoiceoverModal);
+  if (els.aiVoiceoverModal) {
+    els.aiVoiceoverModal.addEventListener("click", (evt) => {
+      if (evt.target.classList.contains("modal-backdrop")) closeAiVoiceoverModal();
+    });
+  }
+  const wireVoiceoverDrop = (dropEl, inputEl, setter) => {
+    if (!dropEl || !inputEl) return;
+    dropEl.addEventListener("click", () => inputEl.click());
+    dropEl.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      dropEl.classList.add("drag-over");
+    });
+    dropEl.addEventListener("dragleave", () => dropEl.classList.remove("drag-over"));
+    dropEl.addEventListener("drop", (e) => {
+      e.preventDefault();
+      dropEl.classList.remove("drag-over");
+      const file = e.dataTransfer?.files?.[0];
+      if (file?.path) setter(file.path);
+    });
+    inputEl.addEventListener("change", () => {
+      const file = inputEl.files?.[0];
+      if (file?.path) setter(file.path);
+    });
+  };
+  wireVoiceoverDrop(els.voiceoverVideoDrop, els.voiceoverVideoInput, (p) => {
+    state.voiceover.videoPath = p;
+    if (els.voiceoverVideoLabel) els.voiceoverVideoLabel.textContent = p.split(/[\\/]/).pop();
+    if (els.voiceoverVideo) els.voiceoverVideo.src = toFileUrl(p);
+    ensureVoiceoverSourceAudio(p);
+    updateVoiceoverButtons();
+  });
+  wireVoiceoverDrop(els.voiceoverSubDrop, els.voiceoverSubInput, (p) => {
+    state.voiceover.subtitlePath = p;
+    if (els.voiceoverSubLabel) els.voiceoverSubLabel.textContent = p.split(/[\\/]/).pop();
+    updateVoiceoverButtons();
+  });
+  if (els.voiceoverParse) els.voiceoverParse.addEventListener("click", parseVoiceoverSubtitles);
+  if (els.voiceoverGenerate) els.voiceoverGenerate.addEventListener("click", generateVoiceoverQueue);
+  if (els.voiceoverPreview) els.voiceoverPreview.addEventListener("click", generateVoiceoverPreview);
+  if (els.voiceoverRender) els.voiceoverRender.addEventListener("click", fullRenderVoiceover);
+  if (els.voiceoverSaveProject) els.voiceoverSaveProject.addEventListener("click", saveVoiceoverProject);
+  if (els.voiceoverLoadProject) els.voiceoverLoadProject.addEventListener("click", loadVoiceoverProject);
+  if (els.voiceoverTimelineBody) {
+    els.voiceoverTimelineBody.addEventListener("click", (e) => {
+      const row = e.target.closest('[data-action="voiceover-row"]');
+      if (!row) return;
+      const idx = Number(row.dataset.idx);
+      if (!Number.isFinite(idx)) return;
+      state.voiceover.selectedIdx = idx;
+      renderVoiceoverTimeline();
+      const cue = state.voiceover.cues[idx];
+      if (cue && els.voiceoverVideo) {
+        const t = Math.max(0, Number(cue.start_ms || 0) + Number(cue.offset_ms || 0));
+        els.voiceoverVideo.currentTime = t / 1000;
+      }
+    });
+    els.voiceoverTimelineBody.addEventListener("input", (e) => {
+      const inp = e.target.closest('[data-action="voiceover-offset"]');
+      if (!inp) return;
+      const idx = Number(inp.dataset.idx);
+      if (!Number.isFinite(idx)) return;
+      const cue = state.voiceover.cues[idx];
+      if (!cue) return;
+      cue.offset_ms = Number(inp.value || 0);
+    });
+  }
+  if (els.voiceoverVideo) {
+    els.voiceoverVideo.addEventListener("loadedmetadata", () => {
+      els.voiceoverVideo.muted = true;
+      voiceoverSourceAudio.volume = els.voiceoverVideo.volume;
+      voiceoverSourceAudio.muted = els.voiceoverVideo.muted;
+      voiceoverSourceAudio.playbackRate = els.voiceoverVideo.playbackRate || 1;
+    });
+    els.voiceoverVideo.addEventListener("play", async () => {
+      if (!state.voiceover.sourceAudioPath) return;
+      voiceoverSourceAudio.currentTime = els.voiceoverVideo.currentTime || 0;
+      try {
+        await voiceoverSourceAudio.play();
+      } catch (_) {}
+    });
+    els.voiceoverVideo.addEventListener("pause", () => {
+      voiceoverSourceAudio.pause();
+    });
+    els.voiceoverVideo.addEventListener("seeking", () => {
+      if (!state.voiceover.sourceAudioPath) return;
+      voiceoverSourceAudio.currentTime = els.voiceoverVideo.currentTime || 0;
+    });
+    els.voiceoverVideo.addEventListener("ratechange", () => {
+      voiceoverSourceAudio.playbackRate = els.voiceoverVideo.playbackRate || 1;
+    });
+    els.voiceoverVideo.addEventListener("volumechange", () => {
+      voiceoverSourceAudio.volume = els.voiceoverVideo.volume;
+      voiceoverSourceAudio.muted = els.voiceoverVideo.muted;
+    });
+    els.voiceoverVideo.addEventListener("timeupdate", () => {
+      const cur = Number.isFinite(els.voiceoverVideo.currentTime) ? els.voiceoverVideo.currentTime : 0;
+      const dur = Number.isFinite(els.voiceoverVideo.duration) ? els.voiceoverVideo.duration : 0;
+      if (state.voiceover.sourceAudioPath && Math.abs((voiceoverSourceAudio.currentTime || 0) - cur) > 0.35) {
+        voiceoverSourceAudio.currentTime = cur;
+      }
+      if (els.voiceoverVideoSeek && !els.voiceoverVideoSeek.matches(":active")) {
+        const v = dur > 0 ? Math.round((cur / dur) * 1000) : 0;
+        els.voiceoverVideoSeek.value = String(v);
+      }
+      if (els.voiceoverVideoTime) {
+        els.voiceoverVideoTime.textContent = `${formatDuration(cur)} / ${formatDuration(dur)}`;
+      }
+    });
+  }
+  if (els.voiceoverVideoSeek && els.voiceoverVideo) {
+    els.voiceoverVideoSeek.addEventListener("input", () => {
+      const dur = Number.isFinite(els.voiceoverVideo.duration) ? els.voiceoverVideo.duration : 0;
+      if (dur <= 0) return;
+      els.voiceoverVideo.currentTime = (Number(els.voiceoverVideoSeek.value || 0) / 1000) * dur;
+    });
+  }
+
+  if (els.btnPlayer) els.btnPlayer.addEventListener("click", openPlayerModal);
+  if (els.playerClose) els.playerClose.addEventListener("click", closePlayerModal);
+  if (els.playerRefresh) els.playerRefresh.addEventListener("click", loadPlayerLibrary);
+  if (els.playerSearch) {
+    els.playerSearch.addEventListener("input", () => {
+      state.player.search = els.playerSearch.value || "";
+      renderPlayerLibrary();
+      savePlayerState();
+    });
+  }
+  if (els.playerModal) {
+    els.playerModal.addEventListener("click", (evt) => {
+      if (evt.target.classList.contains("modal-backdrop")) closePlayerModal();
+    });
+  }
+  if (els.playerLibrary) {
+    els.playerLibrary.addEventListener("click", async (evt) => {
+      const sectionBtn = evt.target.closest('[data-action="player-section"]');
+      if (sectionBtn) {
+        const b = Number(sectionBtn.dataset.book);
+        const s = Number(sectionBtn.dataset.section);
+        selectPlayerSection(b, s);
+        await playCurrentPlayerTrack();
+        return;
+      }
+      const bookHead = evt.target.closest('[data-action="player-book"]');
+      if (bookHead) {
+        const b = Number(bookHead.dataset.book);
+        state.player.bookIndex = (state.player.bookIndex === b) ? -1 : b;
+        renderPlayerLibrary();
+      }
+    });
+  }
+  if (els.playerPlay) {
+    els.playerPlay.addEventListener("click", async () => {
+      if (playerAudio.paused) await playCurrentPlayerTrack();
+      else pausePlayerTrack();
+    });
+  }
+  if (els.playerPrev) els.playerPrev.addEventListener("click", () => stepPlayerTrack(-1));
+  if (els.playerNext) els.playerNext.addEventListener("click", () => stepPlayerTrack(1));
+  if (els.playerBack15) {
+    els.playerBack15.addEventListener("click", () => {
+      playerAudio.currentTime = Math.max(0, (playerAudio.currentTime || 0) - 15);
+      updatePlayerProgress();
+    });
+  }
+  if (els.playerFwd15) {
+    els.playerFwd15.addEventListener("click", () => {
+      const max = Number.isFinite(playerAudio.duration) ? playerAudio.duration : (playerAudio.currentTime + 15);
+      playerAudio.currentTime = Math.min(max, (playerAudio.currentTime || 0) + 15);
+      updatePlayerProgress();
+    });
+  }
+  if (els.playerSeek) {
+    els.playerSeek.addEventListener("input", () => {
+      const dur = Number.isFinite(playerAudio.duration) ? playerAudio.duration : 0;
+      if (dur <= 0) return;
+      playerAudio.currentTime = (Number(els.playerSeek.value) / 1000) * dur;
+      updatePlayerProgress();
+    });
+  }
+  if (els.playerVolume) {
+    els.playerVolume.addEventListener("input", () => {
+      playerAudio.volume = Number(els.playerVolume.value);
+      savePlayerState();
+    });
+  }
+  if (els.playerSpeed) {
+    els.playerSpeed.addEventListener("change", () => {
+      playerAudio.playbackRate = Number(els.playerSpeed.value);
+      savePlayerState();
+    });
+  }
+  if (els.playerShuffle) {
+    els.playerShuffle.addEventListener("click", () => {
+      state.player.shuffle = !state.player.shuffle;
+      els.playerShuffle.textContent = `🔀 Shuffle: ${state.player.shuffle ? "On" : "Off"}`;
+      savePlayerState();
+    });
+  }
+  if (els.playerRepeat) {
+    els.playerRepeat.addEventListener("change", () => {
+      state.player.repeatMode = els.playerRepeat.value || "none";
+      savePlayerState();
+    });
+  }
+  if (els.playerSleepToggle && els.playerSleepMinutes) {
+    els.playerSleepToggle.addEventListener("click", () => {
+      if (state.player.sleepUntil && state.player.sleepUntil > Date.now()) {
+        clearSleepTimer(true);
+      } else {
+        startSleepTimer(Number(els.playerSleepMinutes.value || 0));
+      }
+    });
+  }
+
+  playerAudio.addEventListener("timeupdate", () => {
+    updatePlayerProgress();
+    savePlayerState();
+  });
+  playerAudio.addEventListener("loadedmetadata", async () => {
+    if (Number.isFinite(state.player.pendingResumeTime) && state.player.pendingResumeTime > 0) {
+      const max = Number.isFinite(playerAudio.duration) ? playerAudio.duration : state.player.pendingResumeTime;
+      playerAudio.currentTime = Math.min(max, state.player.pendingResumeTime);
+      state.player.pendingResumeTime = null;
+      updatePlayerProgress();
+    } else {
+      updatePlayerProgress();
+    }
+    if (state.player.autoResumePlayback) {
+      state.player.autoResumePlayback = false;
+      try { await playerAudio.play(); } catch (_) {}
+    }
+  });
+  playerAudio.addEventListener("ended", () => stepPlayerTrack(1));
+  playerAudio.addEventListener("pause", () => {
+    if (els.playerPlay) els.playerPlay.textContent = "▶ Play";
+    savePlayerState();
+  });
+  playerAudio.addEventListener("play", () => {
+    if (els.playerPlay) els.playerPlay.textContent = "⏸ Pause";
+    savePlayerState();
+  });
 
   // ── Voice Creation modal ──────────────────────────────────────────────────
   if (els.btnVoiceCreation) els.btnVoiceCreation.addEventListener("click", openVoiceModal);
@@ -1611,23 +2706,23 @@ function attachEvents() {
   if (els.btnVoiceDownload) {
     els.btnVoiceDownload.addEventListener("click", async () => {
       const url = (els.voiceYoutubeUrl?.value || "").trim();
-      if (!url) { toast("Wklej link YouTube.", "error"); return; }
+      if (!url) { toast("Paste YouTube link.", "error"); return; }
       els.btnVoiceDownload.disabled = true;
       els.voiceLog.innerHTML = "";
       els.voiceLog.style.display = "flex";
-      voiceLogAppend(`⏬ Pobieranie: ${url}`);
+      voiceLogAppend(`⏬ Downloading: ${url}`);
       try {
         const result = await window.api.py("download_youtube_audio", {
           url,
           voices_dir: voicesDir(),
         });
-        if (result.ok === false) throw new Error(result.error || "Błąd pobierania");
-        voiceLogAppend(`✅ Pobrano: ${result.audio_path}`);
+        if (result.ok === false) throw new Error(result.error || "Download error");
+        voiceLogAppend(`✅ Downloaded: ${result.audio_path}`);
         setVoiceSource(result.audio_path);
-        toast(`Pobrano: ${result.title}`, "success");
+        toast(`Downloaded: ${result.title}`, "success");
       } catch (err) {
         voiceLogAppend(`❌ ${err.message}`);
-        toast(`Błąd: ${err.message}`, "error");
+        toast(`Error: ${err.message}`, "error");
       } finally {
         els.btnVoiceDownload.disabled = false;
       }
@@ -1644,24 +2739,42 @@ function attachEvents() {
     });
   }
 
-  // About modal
-  document.getElementById('btn-about')?.addEventListener('click', () => {
+  // About modal — opens on btn-about click, auto-closes after 5 s, also closes on backdrop click.
+  let _aboutTimer = null;
+
+  function openAboutModal() {
     const m = document.getElementById('about-modal');
-    if (m) m.hidden = false;
-  });
-  document.getElementById('about-close')?.addEventListener('click', () => {
+    if (!m) return;
+    m.style.display = 'flex';
+    clearTimeout(_aboutTimer);
+    _aboutTimer = setTimeout(closeAboutModal, 5000);
+  }
+
+  function closeAboutModal() {
     const m = document.getElementById('about-modal');
-    if (m) m.hidden = true;
-  });
+    if (!m) return;
+    clearTimeout(_aboutTimer);
+    _aboutTimer = null;
+    m.style.display = 'none';
+  }
+
+  document.getElementById('btn-about')?.addEventListener('click', openAboutModal);
+  document.getElementById('about-close')?.addEventListener('click', closeAboutModal);
   document.getElementById('about-modal')?.addEventListener('click', (e) => {
-    if (e.target === e.currentTarget) {
-      e.currentTarget.hidden = true;
-    }
+    if (e.target === e.currentTarget) closeAboutModal();
   });
 
   if (els.voiceSplitBtn) els.voiceSplitBtn.addEventListener("click", splitVoice);
 
-  // Delegacja zdarzeń dla przycisków na kartach lektorów (CSP blokuje onclick=)
+  // Delegated handler for voice sample preview play buttons (replaces CSP-blocked onclick=)
+  if (els.voiceSamplesPreview) {
+    els.voiceSamplesPreview.addEventListener("click", (e) => {
+      const btn = e.target.closest('[data-action="preview-play"]');
+      if (btn) playVoiceSample(btn.dataset.path, btn);
+    });
+  }
+
+  // Event delegation for narrator card buttons (CSP blocks inline onclick=)
   if (els.voiceList) {
     els.voiceList.addEventListener("click", async (e) => {
       const btn = e.target.closest("[data-action]");
@@ -1736,12 +2849,12 @@ function attachEvents() {
 
   els.chkPhonetic.addEventListener("change", () => {
     state.phoneticEnabled = Boolean(els.chkPhonetic.checked);
-    toast(`Hard-Fix fonetyki: ${state.phoneticEnabled ? "włączony" : "wyłączony"}`, "info");
+    toast(`Phonetic hard-fix: ${state.phoneticEnabled ? "on" : "off"}`, "info");
   });
 
   els.chkTags.addEventListener("change", () => {
     state.tagsEnabled = Boolean(els.chkTags.checked);
-    toast(`Tagi [pause]: ${state.tagsEnabled ? "włączone" : "wyłączone"}`, "info");
+    toast(`[pause] tags: ${state.tagsEnabled ? "on" : "off"}`, "info");
   });
 
   els.chkDebugTts.addEventListener("change", () => {
@@ -1814,7 +2927,9 @@ function attachEvents() {
       ttsServerExpanded = !ttsServerExpanded;
       ttsServerBody.style.display = ttsServerExpanded ? "block" : "none";
       const arrow = ttsServerExpanded ? "▼" : "▶";
-      ttsServerToggle.childNodes[0].textContent = arrow + " Tryb TTS";
+      const sp = ttsServerToggle.querySelector('[data-i18n="tts_mode_label"]');
+      if (sp) sp.textContent = arrow + ' ' + ((typeof t === 'function') ? t('tts_mode_label').replace(/^[▶▼]\s*/, '') : 'Tryb TTS');
+      else ttsServerToggle.childNodes[0].textContent = arrow + " Tryb TTS";
     });
   }
 
@@ -1859,7 +2974,7 @@ function attachEvents() {
   if (els.btnPickSubdir) {
     els.btnPickSubdir.addEventListener("click", async () => {
       const subdir = (els.subdir?.value || state.subdir || "").trim();
-      if (!subdir) { toast("Najpierw wybierz książkę z listy.", "error"); return; }
+      if (!subdir) { toast("Select a book from the list first.", "error"); return; }
       await autoLoadBookForSubdir(subdir);
     });
   }
@@ -1891,7 +3006,7 @@ function attachEvents() {
       if (!n || n < 1) return;
       const row = els.tbody.querySelector(`tr[data-idx="${n - 1}"]`);
       if (row) row.scrollIntoView({ behavior: "smooth", block: "center" });
-      else toast(`Fragment #${n} nie istnieje.`, "error");
+      else toast(`Fragment #${n} does not exist.`, "error");
     };
     els.btnGotoFrag.addEventListener("click", gotoFrag);
     els.gotoFragInput.addEventListener("keydown", (e) => { if (e.key === "Enter") gotoFrag(); });
@@ -2020,7 +3135,7 @@ function attachEvents() {
       try {
         await els.audioPlayer.play();
       } catch (err) {
-        toast(`Nie mozna odtworzyc: ${err.message}`, "error");
+        toast(`Cannot play: ${err.message}`, "error");
         state.activeAudioIdx = null;
       }
       renderFragments();
@@ -2038,7 +3153,7 @@ function attachEvents() {
     if (editingIdx === null) return;
     const value = els.editText.value.trim();
     if (!value) {
-      toast("Tekst fragmentu nie moze byc pusty.", "error");
+      toast("Fragment text cannot be empty.", "error");
       return;
     }
     state.fragments[editingIdx].text = value;
@@ -2129,26 +3244,133 @@ function attachEvents() {
   });
 }
 
+// ── Backend Log Panel ─────────────────────────────────────────
+(function initLogPanel() {
+  const panel    = document.getElementById('log-panel');
+  const body     = document.getElementById('log-body');
+  const badge    = document.getElementById('log-count');
+  const chevron  = document.getElementById('log-chevron');
+  const toggle   = document.getElementById('log-toggle');
+  const clearBtn = document.getElementById('log-clear');
+  const scrollUp = document.getElementById('log-scroll-up');
+  const scrollDn = document.getElementById('log-scroll-down');
+  const expandBtn= document.getElementById('log-expand');
+  if (!panel || !toggle) return;
+
+  // start collapsed
+  panel.classList.add('log-panel--collapsed');
+
+  toggle.addEventListener('click', (e) => {
+    if (e.target.closest('#log-clear,#log-scroll-up,#log-scroll-down,#log-expand')) return;
+    const collapsed = panel.classList.toggle('log-panel--collapsed');
+    chevron.textContent = collapsed ? '▲' : '▼';
+    if (!collapsed && body) body.scrollTop = body.scrollHeight;
+  });
+
+  clearBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (body) body.innerHTML = '';
+    _logCount = 0;
+    badge.textContent = '0';
+  });
+
+  // Scroll arrows
+  scrollUp.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (body) body.scrollBy({ top: -100, behavior: 'smooth' });
+  });
+  scrollDn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (body) body.scrollBy({ top: 100, behavior: 'smooth' });
+  });
+
+  // Double-click on log body: toggle scroll to top / bottom
+  let _logDblClickAtTop = false;
+  body.addEventListener('dblclick', () => {
+    if (_logDblClickAtTop) {
+      body.scrollTop = body.scrollHeight;
+      _logDblClickAtTop = false;
+    } else {
+      body.scrollTop = 0;
+      _logDblClickAtTop = true;
+    }
+  });
+
+  // Fullscreen expand button
+  expandBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _openLogFullscreen();
+  });
+})();
+
+function _openLogFullscreen() {
+  const modal   = document.getElementById('log-fs-modal');
+  const fsBody  = document.getElementById('log-fs-body');
+  const closeBtn= document.getElementById('log-fs-close');
+  const srcBody = document.getElementById('log-body');
+  if (!modal || !fsBody) return;
+  // Clone all log lines into fullscreen view
+  fsBody.innerHTML = srcBody ? srcBody.innerHTML : '';
+  modal.hidden = false;
+  // Scroll to bottom
+  fsBody.scrollTop = fsBody.scrollHeight;
+  // Double-click in fullscreen: toggle top/bottom
+  let _fsDblAtTop = false;
+  fsBody.ondblclick = () => {
+    if (_fsDblAtTop) { fsBody.scrollTop = fsBody.scrollHeight; _fsDblAtTop = false; }
+    else             { fsBody.scrollTop = 0; _fsDblAtTop = true; }
+  };
+  closeBtn.onclick = () => { modal.hidden = true; };
+  modal.querySelector('.modal-backdrop').onclick = () => { modal.hidden = true; };
+}
+
+let _logCount = 0;
+
+function addLogLine(text, type) {
+  const body  = document.getElementById('log-body');
+  const badge = document.getElementById('log-count');
+  if (!body) return;
+  const MAX = 300;
+  const now = new Date();
+  const ts  = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+  const line = document.createElement('div');
+  line.className = `log-line log-line--${type || 'info'}`;
+  line.innerHTML  = `<span class="log-ts">${ts}</span>${escapeHtml(String(text))}`;
+  body.appendChild(line);
+  _logCount++;
+  if (body.children.length > MAX) body.removeChild(body.firstChild);
+  if (badge) badge.textContent = String(Math.min(_logCount, MAX));
+  // auto-scroll only if already at bottom
+  if (body.scrollHeight - body.scrollTop - body.clientHeight < 50) {
+    body.scrollTop = body.scrollHeight;
+  }
+}
+// ─────────────────────────────────────────────────────────────
+
 function attachBackendEvents() {
   window.api.onEvent((msg) => {
     if (msg.event === "ready") {
       setBackendStatus("backend gotowy", "ready");
+      addLogLine("Backend ready", "success");
       return;
     }
     if (msg.event === "fragment:progress") {
-      // Tryb ręki — przekieruj do handlera hand mode jeśli aktywny
+      // Hand mode - route to hand mode handler if active
       if (state.handMode) {
         handleHandModeEvent(msg);
         return;
       }
       const idx = Number(msg.idx) - 1;
       if (idx >= 0 && idx < state.fragments.length) {
-        state.fragments[idx].status = msg.status || state.fragments[idx].status;
+        const st = msg.status || state.fragments[idx].status;
+        state.fragments[idx].status = st;
         // backend wysyła "wav" lub "wav_path"
         const wavPath = msg.wav_path || msg.wav;
         if (wavPath) state.fragments[idx].wavPath = wavPath;
         if (msg.audio_seconds) state.fragments[idx].audioSeconds = Number(msg.audio_seconds);
         if (msg.duration) state.fragments[idx].audioSeconds = Number(msg.duration);
+        const label = st === "success" ? "success" : st === "error" ? "error" : "progress";
+        addLogLine(`Fragment ${idx + 1}: ${st}`, label);
         renderFragments();
       }
       return;
@@ -2158,22 +3380,46 @@ function attachBackendEvents() {
         handleHandModeEvent(msg);
         return;
       }
+      addLogLine("Queue done", "success");
     }
     if (msg.event === "log") {
       const line = String(msg.line || "");
       if (line.startsWith("[TTS Input]:")) {
-        console.info(line);
+        addLogLine(line, "tts");
         if (state.debugTtsInput) {
           toast(line.slice(0, 180), "info");
         }
+      } else if (line) {
+        addLogLine(line, "info");
       }
+      return;
+    }
+    if (msg.event === "voiceover:progress") {
+      const idx = Number(msg.idx);
+      const cue = state.voiceover.cues.find(c => Number(c.idx) === idx);
+      if (!cue) return;
+      if (msg.status === "processing") {
+        cue.status = "processing";
+      } else if (msg.status === "success") {
+        cue.status = msg.warning ? "warn" : "done";
+        cue.audio_path = msg.audio_path || cue.audio_path;
+        cue.audio_ms = msg.audio_ms || cue.audio_ms;
+        cue.playback_rate = msg.playback_rate || cue.playback_rate || 1;
+        cue.warning = msg.warning || "";
+      } else if (msg.status === "error") {
+        cue.status = "error";
+        cue.error = msg.message || "error";
+      }
+      renderVoiceoverTimeline();
     }
   });
 
   window.api.onLog((line) => {
-    if (line && String(line).toLowerCase().includes("blad")) {
-      toast(String(line), "error");
-    }
+    const s = String(line || "");
+    if (!s) return;
+    const isErr = s.toLowerCase().includes("blad") || s.toLowerCase().includes("error");
+    addLogLine(s, isErr ? "error" : "warn");
+    if (isErr) toast(s, "error");
   });
 }
 
@@ -2214,6 +3460,8 @@ async function bootstrap() {
   state.tagsEnabled = Boolean(els.chkTags.checked);
   state.debugTtsInput = Boolean(els.chkDebugTts.checked);
   els.preparePrompt.value = DEFAULT_PREP_PROMPT;
+  if (els.playerVolume) playerAudio.volume = Number(els.playerVolume.value || 1);
+  if (els.playerSpeed) playerAudio.playbackRate = Number(els.playerSpeed.value || 1);
 
   try {
     await window.api.py("ping", {});
@@ -2229,7 +3477,7 @@ async function bootstrap() {
 
 // ====== Multi-voice speaker support ======
 
-const DEFAULT_SPEAKER_VOICE_MAP = `Narrator=Maciej`;
+const DEFAULT_SPEAKER_VOICE_MAP = ``;
 let state_availableVoices = [];
 
 async function scanAudiobooksSubdirs() {
@@ -2311,15 +3559,6 @@ function resolveVoiceForFragment(frag) {
   }
   if (!matchedVoice) return {};
 
-  const isMaciej = matchedVoice.toLowerCase() === "maciej";
-  if (isMaciej) {
-    return {
-      refAudio: "sample_glos_macieja_10s.wav",
-      refText: "sample_glos_macieja_10s.txt",
-      label: "Maciej",
-    };
-  }
-
   const lectorDir = `${state.workdir}\\Lectors`;
   return {
     refAudio: `${lectorDir}\\${matchedVoice}.wav`,
@@ -2329,7 +3568,7 @@ function resolveVoiceForFragment(frag) {
 }
 
 function speakerVoiceOptions(selectedVoice) {
-  const names = [...new Set(["Maciej", ...state_availableVoices.map(v => v.name)])];
+  const names = [...new Set([...state_availableVoices.map(v => v.name)])];
   return names.map((name) => {
     const selected = name === selectedVoice ? " selected" : "";
     return `<option value="${escapeHtml(name)}"${selected}>${escapeHtml(name)}</option>`;
@@ -2345,7 +3584,7 @@ function normalizeSpeakerVoicePairs(inputPairs) {
     const key = speaker.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    pairs.push({ speaker, voice: (p.voice || "Maciej").trim() });
+    pairs.push({ speaker, voice: (p.voice || state_availableVoices[0]?.name || '').trim() });
   }
   const narratorIdx = pairs.findIndex(p => p.speaker.toLowerCase() === "narrator");
   if (narratorIdx >= 0) {
@@ -2355,7 +3594,7 @@ function normalizeSpeakerVoicePairs(inputPairs) {
       pairs.unshift(n);
     }
   } else {
-    pairs.unshift({ speaker: "Narrator", voice: "Maciej" });
+    pairs.unshift({ speaker: "Narrator", voice: state_availableVoices[0]?.name || '' });
   }
   return pairs;
 }
@@ -2395,7 +3634,7 @@ function buildSpeakerVoiceMapUI() {
 
 function addSpeakerVoiceRow() {
   const pairs = normalizeSpeakerVoicePairs(parseCurrentSpeakerVoiceMap());
-  pairs.push({ speaker: "Nowa postac", voice: state_availableVoices[0]?.name || "Maciej" });
+  pairs.push({ speaker: "Nowa postac", voice: state_availableVoices[0]?.name || '' });
   renderSpeakerVoiceCards(normalizeSpeakerVoicePairs(pairs));
 }
 
@@ -2455,18 +3694,18 @@ async function refreshBnBLocalStatus() {
           const res = await fetch('http://127.0.0.1:8080/', { signal: ctrl.signal });
           clearTimeout(tid);
           if (res.ok) {
-            serverBadge = `<div class="model-alive-badge">🟢 Model załadowany · działa</div>`;
+            serverBadge = `<div class="model-alive-badge">🟢 Model loaded · running</div>`;
           }
         } catch (_) { /* serwer nieaktywny — nie pokazuj dodatkowego statusu */ }
       }
       const badge = hasModel
-        ? `<span style="color:#10b981;">✅ Model pobrany (${files.length} plików)</span>`
-        : `<span style="color:#f59e0b;">⚠ Niekompletny — ${files.length} plik(ów)</span>`;
+        ? `<span style="color:#10b981;">✅ Downloaded (${files.length} files)</span>`
+        : `<span style="color:#f59e0b;">⚠ Incomplete — ${files.length} file(s)</span>`;
       el.innerHTML = badge + serverBadge +
         `<div style="font-size:11px;color:#5b6070;word-break:break-all;margin-top:2px;">${escapeHtml(dir)}</div>`;
     }
   } catch (e) {
-    el.innerHTML = `<span style="color:#ef4444;">Błąd: ${escapeHtml(e.message)}</span>`;
+    el.innerHTML = `<span style="color:#ef4444;">Error: ${escapeHtml(e.message)}</span>`;
   }
 }
 
@@ -2478,10 +3717,10 @@ async function downloadBnBModel() {
   const dlBar        = document.getElementById('models-dl-bar');
   const dlSize       = document.getElementById('models-dl-size');
 
-  if (_modelsDownloading) { toast('Inne pobieranie w toku — anuluj je najpierw.', 'error'); return; }
+  if (_modelsDownloading) { toast('Another download in progress — cancel it first.', 'error'); return; }
 
   if (btn) btn.disabled = true;
-  dlFilename.textContent = 'Pobieranie listy plików z HuggingFace…';
+  dlFilename.textContent = 'Fetching file list from HuggingFace…';
   progressArea.style.display = 'block';
   dlPercent.textContent = '';
   dlBar.style.width = '0%';
@@ -2491,16 +3730,16 @@ async function downloadBnBModel() {
   try {
     files = await window.api.listRemoteModels('bnb');
   } catch (e) {
-    toast(`Błąd listy plików BnB: ${e.message}`, 'error');
+    toast(`BnB file list error: ${e.message}`, 'error');
     progressArea.style.display = 'none';
     if (btn) btn.disabled = false;
     return;
   }
 
-  // Odfiltruj tylko pliki modelu (pomiń README, .gitattributes itp.)
+  // Filter only model files (skip README, .gitattributes, etc.)
   const modelFiles = files.filter(f => !/^(README|\.git|\.lfs)/i.test(f.name));
   if (!modelFiles.length) {
-    toast('Repozytorium nie zawiera plików modelu.', 'error');
+    toast('Repository contains no model files.', 'error');
     progressArea.style.display = 'none';
     if (btn) btn.disabled = false;
     return;
@@ -2513,13 +3752,13 @@ async function downloadBnBModel() {
       dlFilename.textContent = `[${i + 1}/${modelFiles.length}] ${f.name}`;
       dlPercent.textContent = '0%';
       dlBar.style.width = '0%';
-      dlSize.textContent = 'Łączę…';
+      dlSize.textContent = 'Connecting…';
       await window.api.downloadModelFile({ filename: f.name, modelKey: 'bnb' });
     }
-    toast('Model s2-pro-BnB-4Bits pobrany pomyślnie! Zrestartuj aplikację aby go użyć.', 'success');
+    toast('Model s2-pro-BnB-4Bits downloaded! Restart the app to use it.', 'success');
     await refreshBnBLocalStatus();
   } catch (e) {
-    if (e.message !== 'Anulowano') toast(`Błąd pobierania BnB: ${e.message}`, 'error');
+    if (e.message !== 'Cancelled') toast(`BnB download error: ${e.message}`, 'error');
   } finally {
     _modelsDownloading = false;
     progressArea.style.display = 'none';
@@ -2543,7 +3782,7 @@ async function checkModelServerStatus() {
   if (!dot || !label) return;
   const serverUrl = els.serverUrl?.value?.trim() || 'http://127.0.0.1:8080';
   dot.className = 'server-dot server-dot--checking';
-  label.textContent = 'Sprawdzam silnik TTS…';
+  label.textContent = 'Checking TTS engine…';
   try {
     const r = await fetch(serverUrl + '/', { signal: AbortSignal.timeout(4000) });
     const data = await r.json();
@@ -2551,14 +3790,14 @@ async function checkModelServerStatus() {
       dot.className = 'server-dot server-dot--ok';
       const mode = data.bnb_mode ? 'BnB-NF4' : 'fp16';
       const dev  = (data.device || '').replace('cuda', 'CUDA').replace('cpu', 'CPU');
-      label.innerHTML = `✅ Model załadowany i działa &nbsp;<span style="color:#8a8f99;font-size:11px;">${escapeHtml(data.engine || '')} · ${mode} · ${escapeHtml(dev)}</span>`;
+      label.innerHTML = `✅ Model loaded and running &nbsp;<span style="color:#8a8f99;font-size:11px;">${escapeHtml(data.engine || '')} · ${mode} · ${escapeHtml(dev)}</span>`;
     } else {
       dot.className = 'server-dot server-dot--loading';
-      label.innerHTML = `⏳ Serwer uruchamia model… <span style="color:#8a8f99;font-size:11px;">(status: ${escapeHtml(data.status || '')})</span>`;
+      label.innerHTML = `⏳ Server loading model… <span style="color:#8a8f99;font-size:11px;">(status: ${escapeHtml(data.status || '')})</span>`;
     }
   } catch (_) {
     dot.className = 'server-dot server-dot--off';
-    label.innerHTML = '🔴 Serwer TTS nie działa &nbsp;<span style="color:#8a8f99;font-size:11px;">(uruchom aplikację i poczekaj na załadowanie modelu)</span>';
+    label.innerHTML = '🔴 TTS server not running &nbsp;<span style="color:#8a8f99;font-size:11px;">(launch the app and wait for the model to load)</span>';
   }
 }
 
@@ -2569,17 +3808,17 @@ function closeModelsModal() {
 
 async function refreshModelsLocal() {
   const listEl = document.getElementById('models-local-list');
-  listEl.innerHTML = '<span style="color:#8a8f99;">Sprawdzam…</span>';
+  listEl.innerHTML = '<span style="color:#8a8f99;">Checking…</span>';
   try {
     _modelsLocalStatus = await window.api.getModelsStatus();
     const { files, dir, installed, hasModel, hasCodec } = _modelsLocalStatus;
     if (!files || files.length === 0) {
-      listEl.innerHTML = `<div style="color:#ef4444;">⚠ Brak plików modelu w folderze:</div>
+      listEl.innerHTML = `<div style="color:#ef4444;">⚠ No model files in folder:</div>
         <div style="font-size:11px;color:#5b6070;word-break:break-all;margin-top:4px;">${escapeHtml(dir)}</div>`;
     } else {
       const badge = installed
-        ? '<div style="color:#10b981;font-weight:600;margin-bottom:6px;">✅ Model gotowy</div>'
-        : `<div style="color:#f59e0b;font-weight:600;margin-bottom:6px;">⚠ Niekompletny &mdash; brak ${!hasModel ? 'modelu (.pth)' : 'kodeka (codec.pth)'}</div>`;
+        ? '<div style="color:#10b981;font-weight:600;margin-bottom:6px;">✅ Model ready</div>'
+        : `<div style="color:#f59e0b;font-weight:600;margin-bottom:6px;">⚠ Incomplete &mdash; missing ${!hasModel ? 'model (.pth)' : 'codec (codec.pth)'}</div>`;
       const rows = files.map(f =>
         `<div style="font-size:12px;color:#aab0bc;margin-top:3px;">📄 ${escapeHtml(f.name)}
           <span style="color:#5b6070;margin-left:6px;">${formatFileSize(f.size)}</span></div>`
@@ -2588,26 +3827,26 @@ async function refreshModelsLocal() {
     }
     if (_modelsRemoteFiles.length > 0) renderModelsRemoteList();
   } catch (e) {
-    listEl.innerHTML = `<span style="color:#ef4444;">Błąd: ${escapeHtml(e.message)}</span>`;
+    listEl.innerHTML = `<span style="color:#ef4444;">Error: ${escapeHtml(e.message)}</span>`;
   }
 }
 
 async function loadModelsRemote() {
   const remoteEl = document.getElementById('models-remote-list');
-  remoteEl.innerHTML = '<div style="color:#8a8f99;font-size:13px;">Pobieranie listy z HuggingFace…</div>';
+  remoteEl.innerHTML = '<div style="color:#8a8f99;font-size:13px;">Fetching list from HuggingFace…</div>';
   try {
     _modelsRemoteFiles = await window.api.listRemoteModels();
     renderModelsRemoteList();
   } catch (e) {
-    remoteEl.innerHTML = `<div style="color:#ef4444;font-size:13px;">Błąd: ${escapeHtml(e.message)}</div>
-      <div style="font-size:12px;color:#8a8f99;margin-top:6px;">Pobierz ręcznie z: huggingface.co/fishaudio/fish-speech-1.5</div>`;
+    remoteEl.innerHTML = `<div style="color:#ef4444;font-size:13px;">Error: ${escapeHtml(e.message)}</div>
+      <div style="font-size:12px;color:#8a8f99;margin-top:6px;">Download manually from: huggingface.co/fishaudio/fish-speech-1.5</div>`;
   }
 }
 
 function renderModelsRemoteList() {
   const remoteEl = document.getElementById('models-remote-list');
   if (!_modelsRemoteFiles.length) {
-    remoteEl.innerHTML = '<div style="color:#8a8f99;">Brak plików w repozytorium.</div>';
+    remoteEl.innerHTML = '<div style="color:#8a8f99;">No files in repository.</div>';
     return;
   }
   const localNames = new Set((_modelsLocalStatus.files || []).map(f => f.name));
@@ -2630,7 +3869,7 @@ function renderModelsRemoteList() {
 }
 
 async function startModelDownload(filename) {
-  if (_modelsDownloading) { toast('Inne pobieranie w toku — anuluj je najpierw.', 'error'); return; }
+  if (_modelsDownloading) { toast('Another download in progress — cancel it first.', 'error'); return; }
   _modelsDownloading = true;
   const progressArea = document.getElementById('models-download-progress');
   const dlFilename   = document.getElementById('models-dl-filename');
@@ -2645,10 +3884,10 @@ async function startModelDownload(filename) {
   document.querySelectorAll('.models-file-row [data-action="model-download"]').forEach(b => { b.disabled = true; });
   try {
     await window.api.downloadModelFile({ filename });
-    toast(`Pobrano: ${filename}`, 'success');
+    toast(`Downloaded: ${filename}`, 'success');
     await refreshModelsLocal();
   } catch (e) {
-    if (e.message !== 'Anulowano') toast(`Błąd pobierania ${filename}: ${e.message}`, 'error');
+    if (e.message !== 'Anulowano') toast(`Download error ${filename}: ${e.message}`, 'error');
   } finally {
     _modelsDownloading = false;
     progressArea.style.display = 'none';
@@ -2688,7 +3927,7 @@ function onModelDownloadProgress(data) {
   if (btnOpenBnBDir)  btnOpenBnBDir.addEventListener('click', () => window.api.openModelsDir('bnb'));
   if (btnCancel)      btnCancel.addEventListener('click', async () => {
     await window.api.cancelDownload();
-    toast('Pobieranie anulowane.', 'info');
+    toast('Download cancelled.', 'info');
   });
   if (modalsModal) {
     modalsModal.querySelector('.modal-backdrop')?.addEventListener('click', closeModelsModal);
@@ -2704,7 +3943,7 @@ function onModelDownloadProgress(data) {
   }
 }());
 
-// ─── Tryb Ręki ───────────────────────────────────────────────────────────────
+// ─── Hand Mode ───────────────────────────────────────────────────────────────
 
 function openHandModal() {
   document.getElementById('hand-modal').removeAttribute('hidden');
@@ -2796,9 +4035,9 @@ async function generateHandMode() {
   const voiceName = document.getElementById('hand-voice-select')?.value;
   const text = document.getElementById('hand-text')?.value.trim();
 
-  if (!voiceName) { toast('Wybierz lektora.', 'error'); return; }
-  if (!text)      { toast('Wpisz tekst do wygenerowania.', 'error'); return; }
-  if (!state.workdir) { toast('Ustaw katalog roboczy w głównym oknie.', 'error'); return; }
+  if (!voiceName) { toast('Select a narrator.', 'error'); return; }
+  if (!text)      { toast('Enter text to generate.', 'error'); return; }
+  if (!state.workdir) { toast('Set working directory in the main window.', 'error'); return; }
 
   // Podziel tekst na fragmenty
   const now = new Date();
@@ -2862,12 +4101,12 @@ async function generateHandMode() {
       output_format: 'mp3',
     });
     if (res && (res.error || res.ok === false)) {
-      toast('Błąd generacji: ' + (res.error || res.reason || 'nieznany błąd'), 'error');
+      toast('Generation error: ' + (res.error || res.reason || 'unknown error'), 'error');
     }
     // Odśwież listę plików po zakończeniu
     refreshHandFileList();
   } catch (e) {
-    toast('Błąd generacji: ' + e.message, 'error');
+    toast('Generation error: ' + e.message, 'error');
   } finally {
     if (state.handMode) {
       // queue:done nie przyszedł — odblokuj przycisk
@@ -2927,13 +4166,19 @@ async function generateHandMode() {
     updateChunkHint(parseInt(slider.value, 10));
   }
 
-  // delegacja: play/stop na liście plików
+  // delegacja: play/stop i otwieranie pliku na liście plików
   document.getElementById('hand-file-list')?.addEventListener('click', (e) => {
-    const btn = e.target.closest('.hand-play-btn');
-    if (!btn) return;
-    const path = btn.dataset.path;
-    if (!path) return;
-    playHandFile(path, btn);
+    const playBtn = e.target.closest('.hand-play-btn');
+    if (playBtn) {
+      const path = playBtn.dataset.path;
+      if (path) playHandFile(path, playBtn);
+      return;
+    }
+    const openBtn = e.target.closest('[data-action="hand-open-file"]');
+    if (openBtn) {
+      const file = openBtn.dataset.file;
+      if (file) window.api.openWavFile(file);
+    }
   });
 }());
 
@@ -2989,10 +4234,24 @@ async function refreshHandFileList() {
         <button class="hand-play-btn" data-path="${escapeHtml(fullPath)}" title="Odtwórz / Zatrzymaj">▶</button>
         <span class="hand-file-name" title="${escapeHtml(fullPath)}">${escapeHtml(name)}</span>
         <button class="btn btn-ghost" style="font-size:11px;padding:2px 8px;flex-shrink:0;"
-          onclick="window.api.openWavFile('${escapeHtml(fullPath).replace(/'/g, "\\'")}')">📂</button>
+          data-action="hand-open-file" data-file="${escapeHtml(fullPath)}">📂</button>
       </div>`;
     }).join('');
   } catch (e) {
     container.textContent = 'Błąd odczytu folderu: ' + e.message;
   }
 }
+
+// ─── Language switcher ────────────────────────────────────────────────────────
+(function initLangSwitcher() {
+  window.addEventListener('langchange', () => {
+    if (els.playerShuffle) {
+      els.playerShuffle.textContent = (typeof t === "function")
+        ? t(state.player.shuffle ? "player_shuffle_on" : "player_shuffle_off")
+        : `🔀 Shuffle: ${state.player.shuffle ? "On" : "Off"}`;
+    }
+    refreshSleepTimerUi();
+    updatePlayerMeta();
+    renderFragments();
+  });
+})();
