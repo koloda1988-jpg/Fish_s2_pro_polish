@@ -2370,3 +2370,130 @@ textarea {
 .speaker-map-section .speaker-voice-map-wrap {
   min-height: 50px;
 }
+
+.modal-window--live-action {
+  width: min(900px, 94vw);
+  max-height: 88vh;
+}
+
+.live-action-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.live-action-config-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 10px;
+}
+
+.live-action-history {
+  min-height: 280px;
+  max-height: 52vh;
+  overflow-y: auto;
+  border: 1px solid #2a3148;
+  border-radius: 10px;
+  padding: 12px;
+  background: linear-gradient(180deg, rgba(24, 29, 44, 0.95), rgba(18, 22, 34, 0.95));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.live-action-msg {
+  max-width: 80%;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.live-action-msg--user {
+  align-self: flex-end;
+  background: #28324a;
+  border: 1px solid #43567c;
+  color: #d8e4ff;
+}
+
+.live-action-msg--bot {
+  align-self: flex-start;
+  background: #1b2a22;
+  border: 1px solid #315643;
+  color: #d5f1df;
+}
+
+.live-action-msg-content {
+  width: 100%;
+}
+
+.live-action-msg-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+.live-action-speak-btn {
+  display: none !important;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 2px 8px;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.live-action-speak-btn.is-playing {
+  color: #ffb4a1;
+  border-color: #c85f42;
+}
+
+.live-action-speak-btn.is-loading {
+  opacity: 0.9;
+  cursor: wait;
+}
+
+.live-action-speak-btn .hand-spinner {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+}
+
+.live-action-msg--system {
+  align-self: center;
+  max-width: 96%;
+  background: rgba(42, 49, 72, 0.55);
+  border: 1px dashed #4a5578;
+  color: #c5d0e8;
+  text-align: center;
+}
+
+.live-action-composer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: end;
+}
+
+#live-action-input {
+  resize: vertical;
+  min-height: 72px;
+  max-height: 180px;
+}
+
+.live-action-footer {
+  justify-content: flex-start;
+}
+
+@media (max-width: 820px) {
+  .live-action-config-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .live-action-msg {
+    max-width: 92%;
+  }
+}

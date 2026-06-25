@@ -16,6 +16,14 @@ contextBridge.exposeInMainWorld('api', {
   readTextFile: (p) => ipcRenderer.invoke('fs:readText', p),
   writeTextFile: (path, text) => ipcRenderer.invoke('fs:writeText', { path, text }),
 
+  // cleanup user data
+  cleanupUserData: (payload) => ipcRenderer.invoke('cleanup:userdata', payload || {}),
+  onCleanupProgress: (cb) => {
+    const fn = (_evt, data) => cb(data);
+    ipcRenderer.on('cleanup:progress', fn);
+    return () => ipcRenderer.removeListener('cleanup:progress', fn);
+  },
+
   // reload renderera (bez restartu serwera TTS)
   reloadApp: () => ipcRenderer.invoke('window:reload'),
 

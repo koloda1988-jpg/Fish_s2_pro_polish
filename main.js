@@ -210,6 +210,56 @@ function ensureLanguagesDirWithDefaults() {
   }
 }
 
+function ensureRuntimeDataDirs() {
+  const requiredDirs = ['project', 'movies', 'subtitles', 'audiobooks', 'files_books'];
+  for (const dirName of requiredDirs) {
+    const dirPath = path.join(INSTALL_DIR, dirName);
+    fs.mkdirSync(dirPath, { recursive: true });
+  }
+}
+function pathSizeBytes(targetPath) {
+  if (!fs.existsSync(targetPath)) return 0;
+  let total = 0;
+  const stack = [targetPath];
+  while (stack.length) {
+    const current = stack.pop();
+    let st;
+    try {
+      st = fs.lstatSync(current);
+    } catch (_) {
+      continue;
+    }
+    if (!st.isDirectory()) {
+      total += st.size || 0;
+      continue;
+    }
+    let entries = [];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch (_) {
+      continue;
+    }
+    for (const entry of entries) {
+      stack.push(path.join(current, entry.name));
+    }
+  }
+  return total;
+}
+
+function fmtBytes(bytes) {
+  const n = Number(bytes || 0);
+  if (n <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = n;
+  let idx = 0;
+  while (value >= 1024 && idx < units.length - 1) {
+    value /= 1024;
+    idx += 1;
+  }
+  const precision = idx <= 1 ? 0 : 2;
+  return `${value.toFixed(precision)} ${units[idx]}`;
+}
+
 function listLanguageFiles() {
   ensureLanguagesDirWithDefaults();
   const files = fs.readdirSync(LANGUAGES_DIR)
@@ -1198,6 +1248,7 @@ let splashOpenTime = 0;
 
 app.whenReady().then(async () => {
   ensureLanguagesDirWithDefaults();
+  ensureRuntimeDataDirs();
   createSplash();
   splashOpenTime = Date.now();
 

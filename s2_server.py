@@ -17,7 +17,7 @@ the model in VRAM between requests, and exposes the same endpoint as s2.cpp:
         top_p            (float) - default 0.8
         repetition_penalty (float) - default 1.1
         chunk_length     (int)   - default 200 (100..400)
-        max_new_tokens   (int)   - default 0 (= no limit)
+        max_new_tokens   (int)   - default 500
         seed             (int)   - default none (random)
 
     Returns: 200 + audio/wav (PCM_16, sample_rate from model, usually 44100)
@@ -405,6 +405,8 @@ async def generate(
     seed: Optional[str] = Form(None),
 ):
     """Main endpoint compatible with s2.cpp /generate."""
+    DEFAULT_MAX_NEW_TOKENS = 500
+    MAX_MAX_NEW_TOKENS = 500
     MAX_TEXT_CHARS = 2000
     if not text.strip():
         raise HTTPException(400, "Field 'text' cannot be empty.")
@@ -423,7 +425,8 @@ async def generate(
     top_p_val  = _parse_optional_float(top_p, 0.8)
     rep_val    = _parse_optional_float(repetition_penalty, 1.1)
     chunk_val  = _parse_optional_int(chunk_length, 512)
-    tokens_val = _parse_optional_int(max_new_tokens, 0)
+    tokens_raw = _parse_optional_int(max_new_tokens, DEFAULT_MAX_NEW_TOKENS)
+    tokens_val = max(0, min(MAX_MAX_NEW_TOKENS, tokens_raw))
     seed_val   = _parse_optional_int(seed, 0) or None  # 0/absent → None (random)
 
     # Reference audio — read bytes (if provided).
