@@ -1,13 +1,14 @@
 # backup.ps1 — backup aplikacji wersja 2 do folderu backup\
 #
 # UZYCIE:
-#   .\backup.ps1                # default: Slim (~60 MB, sam kod + konfig + lektory)
-#   .\backup.ps1 -Standard      # ~420 MB (kod + Audiobooks + dist)
-#   .\backup.ps1 -Full          # ~870 MB (wszystko prócz venv i modeli)
+#   .\backup.ps1                # default: Slim (sam kod + konfig, bez wygenerowanych danych)
+#   .\backup.ps1 -Standard      # kod + czesc artefaktow runtime
+#   .\backup.ps1 -Full          # wszystko procz venv i modeli
 #
-# Co kazdy tryb wyklucza (poza zawsze: venv, models, __pycache__, .cache):
-#   Slim     : + node_modules, dist, backend-build, backend-dist, backend-spec, Audiobooks
-#   Standard : + node_modules, backend-build, backend-dist, backend-spec
+# Co kazdy tryb wyklucza (poza zawsze: .git, venv, models, lectors, __pycache__, .cache):
+#   Slim     : + node_modules, dist, backend-build, backend-dist, backend-spec,
+#              audiobooks, movies, project, files_books, subtitles, temp_cache, temp_voiceover
+#   Standard : + node_modules, backend-build, backend-dist, backend-spec, temp_cache, temp_voiceover
 #   Full     : (nic dodatkowego)
 #
 # Uwaga: 'venv' i 'models' sa ZAWSZE pomijane:
@@ -47,12 +48,15 @@ if (-not (Test-Path $backupRoot)) {
 }
 
 # Lista folderow do wykluczenia w zaleznosci od trybu
-# venv i models sa ZAWSZE wykluczone (4+ GB kazdy, mozna odtworzyc)
-$excludeDirs = @("__pycache__", "models", "venv", ".cache")
+# .git (w tym .git/lfs/objects), venv, models i lectors sa ZAWSZE wykluczone
+$excludeDirs = @(".git", "__pycache__", "models", "lectors", "venv", ".cache")
 if ($Slim) {
-    $excludeDirs += @("node_modules", "dist", "backend-build", "backend-dist", "backend-spec", "Audiobooks")
+    $excludeDirs += @(
+        "node_modules", "dist", "backend-build", "backend-dist", "backend-spec",
+        "audiobooks", "movies", "project", "files_books", "subtitles", "temp_cache", "temp_voiceover"
+    )
 } elseif ($Standard) {
-    $excludeDirs += @("node_modules", "backend-build", "backend-dist", "backend-spec")
+    $excludeDirs += @("node_modules", "backend-build", "backend-dist", "backend-spec", "temp_cache", "temp_voiceover")
 }
 # Full: nic dodatkowego (bez node_modules, bez dist)
 
@@ -76,7 +80,7 @@ Write-Host "Wykluczam pliki:    $($excludeFiles -join ', ')" -ForegroundColor Da
 $xdArgs = $excludeDirs | ForEach-Object { @("/XD", $_) } | ForEach-Object { $_ }
 $xfArgs = $excludeFiles | ForEach-Object { @("/XF", $_) } | ForEach-Object { $_ }
 
-$args = @(
+$robocopyArgs = @(
     "`"$src`"",
     "`"$dst`"",
     "/E",           # kopiuj wszystkie podkatalogi (lacznie z pustymi)
@@ -90,12 +94,12 @@ $args = @(
 ) + $xdArgs + $xfArgs
 
 Write-Host "`n=== KOPIOWANIE ===" -ForegroundColor Cyan
-$cmd = "robocopy " + ($args -join " ")
+$cmd = "robocopy " + ($robocopyArgs -join " ")
 Write-Host "Cmd: $cmd" -ForegroundColor DarkGray
 Write-Host ""
 
 # robocopy zwraca 0..7 jako sukces (1 = pliki skopiowane, 0 = nic do roboty)
-$proc = Start-Process -FilePath "robocopy" -ArgumentList $args -NoNewWindow -PassThru -Wait
+$proc = Start-Process -FilePath "robocopy" -ArgumentList $robocopyArgs -NoNewWindow -PassThru -Wait
 $exitCode = $proc.ExitCode
 
 if ($exitCode -lt 8) {

@@ -1,38 +1,69 @@
-# Node
-node_modules/
-package-lock.json
+# ---- Python environments and cache ----
+venv/
+.venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+.mypy_cache/
 
-# Build outputs
+# ---- Node / frontend ----
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- IDE / editor ----
+.vscode/
+.idea/
+*.suo
+*.user
+*.userossc
+
+# ---- Build artifacts ----
 dist/
+build/
 backend-build/
 backend-dist/
 backend-spec/
 
-# Python virtual environment
-venv/
-
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-
-# Models (duże pliki binarne) - tylko top-level katalog z wagami
-/models/
-
-# Dane użytkownika i wyjście
-Audiobooks/
-Files_books/
-Lectors/
-Silos/
-"Atlas chmur - David Mitchell"/
-
-# Pliki tymczasowe
-*.lnk
-backup.txt
-*.wav
-*.mp3
-
-# Logi
+# ---- Logs / temp / generated runtime data ----
 *.log
+tmp/
+temp/
+temp_cache/
+temp_voiceover/
+outputs/
+
+# ---- User-generated media/project outputs ----
+audiobooks/
+movies/
+project/
+files_books/
+subtitles/
+
+# ---- Local AI assets (kept locally, excluded from Git) ----
+models/
+lectors/
+
+# ---- Local backup / shortcuts ----
+backup/
+backup.txt
+*.lnk
+
+# ---- Secrets ----
+.env
+.env.*
+!.env.example
+*.env.local
+config.json
+config.local.json
+config.secret.json
+
+# Keep package lock for reproducible Node installs
+!package-lock.json
