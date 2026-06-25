@@ -1,0 +1,63 @@
+{
+  "title": "Install Fish Fin Voice",
+  "description": "Konfiguruje repozytorium, lokalne venv Python 3.10 oraz zaleznosci Python i Node.js na Windows, Linux i macOS.",
+  "env": {
+    "app_dir": "{{path.this}}",
+    "venv_dir": "{{path.resolve(path.this, 'venv')}}",
+    "requirements_file": "{{path.resolve(path.this, 'requirements.txt')}}"
+  },
+  "steps": [
+    {
+      "id": "clone-repo-if-needed",
+      "method": "git.clone",
+      "params": {
+        "url": "https://github.com/koloda1988-jpg/Fish_s2_pro_polish.git",
+        "path": "{{path.this}}",
+        "skipIfExists": true
+      }
+    },
+    {
+      "id": "create-python-venv-windows",
+      "when": "{{ platform === 'win32' }}",
+      "method": "shell.run",
+      "params": {
+        "cwd": "{{path.this}}",
+        "message": "python -m venv \"{{path.resolve(path.this, 'venv')}}\""
+      }
+    },
+    {
+      "id": "create-python-venv-linux",
+      "when": "{{ platform === 'linux' }}",
+      "method": "shell.run",
+      "params": {
+        "cwd": "{{path.this}}",
+        "message": "python3 -m venv \"{{path.resolve(path.this, 'venv')}}\""
+      }
+    },
+    {
+      "id": "create-python-venv-macos",
+      "when": "{{ platform === 'darwin' }}",
+      "method": "shell.run",
+      "params": {
+        "cwd": "{{path.this}}",
+        "message": "python3 -m venv \"{{path.resolve(path.this, 'venv')}}\""
+      }
+    },
+    {
+      "id": "install-python-requirements",
+      "method": "pip.install",
+      "params": {
+        "cwd": "{{path.this}}",
+        "venv": "{{path.resolve(path.this, 'venv')}}",
+        "requirements": "{{path.resolve(path.this, 'requirements.txt')}}"
+      }
+    },
+    {
+      "id": "install-node-dependencies",
+      "method": "npm.install",
+      "params": {
+        "cwd": "{{path.this}}"
+      }
+    }
+  ]
+}

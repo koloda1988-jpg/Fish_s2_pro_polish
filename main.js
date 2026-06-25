@@ -32,7 +32,7 @@ const https = require('https');
 const INSTALL_DIR         = app.isPackaged ? path.dirname(process.resourcesPath) : __dirname;
 const PYTHON_SCRIPTS_DIR  = app.isPackaged ? process.resourcesPath               : __dirname;
 const S2_SERVER_PY        = path.join(PYTHON_SCRIPTS_DIR, 's2_server.py');
-const LOCAL_VENV_PYTHON   = path.join(INSTALL_DIR, 'venv', 'Scripts', 'python.exe');
+const LOCAL_VENV_DIR      = path.join(INSTALL_DIR, 'venv');
 const LANGUAGES_DIR       = path.join(INSTALL_DIR, 'languages');
 
 const HF_REPO = 'fishaudio/fish-speech-1.5';
@@ -525,7 +525,13 @@ function setSplashProgress(pct) {
 // ─── s2_server.py spawn ────────────────────────────────────────────────────
 
 function getProjectPython() {
-  return LOCAL_VENV_PYTHON;
+  if (process.env.PINOKIO_VENV_PYTHON) {
+    return process.env.PINOKIO_VENV_PYTHON;
+  }
+  if (process.platform === 'win32') {
+    return path.join(LOCAL_VENV_DIR, 'Scripts', 'python.exe');
+  }
+  return path.join(LOCAL_VENV_DIR, 'bin', 'python');
 }
 
 function startS2Server() {
@@ -657,8 +663,9 @@ function getBackendLaunchConfig() {
   if (app.isPackaged) {
     // Installed mode: use local venv + python_backend.py from resources
     const scriptPath = path.join(process.resourcesPath, 'python_backend.py');
-    if (fs.existsSync(LOCAL_VENV_PYTHON)) {
-      return { command: LOCAL_VENV_PYTHON, args: [scriptPath], mode: 'local-venv' };
+    const venvPython = getProjectPython();
+    if (fs.existsSync(venvPython)) {
+      return { command: venvPython, args: [scriptPath], mode: 'local-venv' };
     }
     // Fallback: compiled exe (if pyinstaller build was created)
     const exePath = path.join(process.resourcesPath, 'python_backend.exe');

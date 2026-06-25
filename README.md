@@ -81,15 +81,19 @@ Jesli masz gotowy instalator z wydania:
 Uwaga: przy pierwszym uruchomieniu system moze zapytac o zgode zapory sieciowej.
 
 ## Quick instalator (Pinokio)
-Repo zawiera podstawowe pliki launchera Pinokio:
+Repo zawiera gotowy launcher Pinokio do instalacji jednym kliknieciem:
 - `pinokio.js`
-- `install.js`
-- `start.js`
-- `pinokio.json`
+- `install.json`
+- `start.json`
 
 Workflow Pinokio:
-1. Install: przygotowuje srodowisko (Python/Git, venv, requirements, npm install).
-2. Start: uruchamia aplikacje.
+1. Install: przygotowuje srodowisko per platforma (Windows/Linux/macOS), tworzy lokalne `venv`, instaluje `requirements.txt` oraz `npm install`.
+2. Start: uruchamia Electron przez `start.json`, a aplikacja samodzielnie odpala backend Python z lokalnego `venv`.
+
+One-click flow w Pinokio:
+1. Otworz repo w Pinokio.
+2. Kliknij `Zainstaluj`.
+3. Po zakonczeniu kliknij `Uruchom`.
 
 ## Budowa instalatora Windows
 Konfiguracja NSIS jest gotowa w projekcie.

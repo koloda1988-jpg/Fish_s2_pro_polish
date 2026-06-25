@@ -1,0 +1,55 @@
+{
+  "title": "Start Fish Fin Voice",
+  "description": "Uruchamia aplikacje Electron z platform-aware konfiguracja lokalnego venv dla Windows, Linux i macOS.",
+  "env": {
+    "app_dir": "{{path.this}}",
+    "venv_dir": "{{path.resolve(path.this, 'venv')}}",
+    "PYTHONUNBUFFERED": "1",
+    "PYTHONIOENCODING": "utf-8",
+    "ELECTRON_DISABLE_SECURITY_WARNINGS": "true"
+  },
+  "steps": [
+    {
+      "id": "start-electron-app-windows",
+      "when": "{{ platform === 'win32' }}",
+      "method": "npm.start",
+      "params": {
+        "cwd": "{{path.this}}",
+        "env": {
+          "PINOKIO_VENV_PYTHON": "{{path.resolve(path.this, 'venv', 'Scripts', 'python.exe')}}",
+          "PYTHONUNBUFFERED": "1",
+          "PYTHONIOENCODING": "utf-8",
+          "ELECTRON_DISABLE_SECURITY_WARNINGS": "true"
+        }
+      }
+    },
+    {
+      "id": "start-electron-app-linux",
+      "when": "{{ platform === 'linux' }}",
+      "method": "npm.start",
+      "params": {
+        "cwd": "{{path.this}}",
+        "env": {
+          "PINOKIO_VENV_PYTHON": "{{path.resolve(path.this, 'venv', 'bin', 'python')}}",
+          "PYTHONUNBUFFERED": "1",
+          "PYTHONIOENCODING": "utf-8",
+          "ELECTRON_DISABLE_SECURITY_WARNINGS": "true"
+        }
+      }
+    },
+    {
+      "id": "start-electron-app-macos",
+      "when": "{{ platform === 'darwin' }}",
+      "method": "npm.start",
+      "params": {
+        "cwd": "{{path.this}}",
+        "env": {
+          "PINOKIO_VENV_PYTHON": "{{path.resolve(path.this, 'venv', 'bin', 'python')}}",
+          "PYTHONUNBUFFERED": "1",
+          "PYTHONIOENCODING": "utf-8",
+          "ELECTRON_DISABLE_SECURITY_WARNINGS": "true"
+        }
+      }
+    }
+  ]
+}
