@@ -1,6 +1,6 @@
-# Fish Fin Voice - Beta 0.1
+# Fish Fin Voice - Beta 0.1 POLSKI
 
-Fish Fin Voice to lokalna aplikacja desktopowa (Electron + Python) do generowania lektora AI dla audiobookow i materialow wideo. Projekt laczy synteze mowy TTS, obrobke tekstu, prace na napisach oraz automatyzacje pipeline'u audio.
+Fish Fin Voice to lokalna aplikacja desktopowa (Electron + Python) do generowania lektora AI dla audiobooków i materialow wideo. Projekt laczy synteze mowy TTS, obrobke tekstu, prace na napisach oraz automatyzacje pipeline'u audio.
 
 ## Co potrafi aplikacja
 - generowanie audiobookow z tekstu (TXT/EPUB/PDF),
@@ -13,13 +13,13 @@ Fish Fin Voice to lokalna aplikacja desktopowa (Electron + Python) do generowani
 - Windows 10/11 (zalecane),
 - Python 3.10+,
 - Node.js 18+ i npm,
-- (opcjonalnie) GPU do szybszej syntezy i QA.
+- GPU 16 GB VRAM
 
 ## Instalacja krok po kroku
 1. Sklonuj repozytorium:
 
 ```bash
-git clone https://github.com/TWOJ_LOGIN/TWOJE_REPO.git
+git clone https://github.com/koloda1988-jpg/Fish_s2_pro_polish/
 cd "Fish Fin Voice"
 ```
 
@@ -83,7 +83,7 @@ CMD:
 set GEMINI_API_KEY=wklej_tutaj_swoj_klucz
 ```
 
-Mozesz tez trzymac ustawienia lokalnie w pliku `.env` (plik nie powinien byc commitowany). Przykladowe wpisy:
+Mozesz tez trzymac ustawienia lokalnie w pliku `.env` 
 
 - `GEMINI_API_KEY=...`
 - `WHISPER_MODEL=small`
