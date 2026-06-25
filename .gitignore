@@ -42,9 +42,11 @@ outputs/
 
 # ---- User-generated media/project outputs ----
 audiobooks/
+Audiobooks/
 movies/
 project/
 files_books/
+Files_books/
 subtitles/
 
 # ---- Local AI assets (kept locally, excluded from Git) ----
