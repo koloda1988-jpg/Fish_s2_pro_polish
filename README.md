@@ -8,7 +8,7 @@ Electron GUI (jak w `electron/`) + Python backend + server-pipeline z `wersja 2/
 **Wymagania jednorazowe:** Python 3.10+ i Node.js 18+
 
 ```powershell
-cd "C:\Users\kolod\Documents\Claude\Projects\Audiobook\Audiobook (1)\wersja 3"
+cd "folder projektu"
 build_full.bat
 ```
 
