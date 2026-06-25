@@ -1,6 +1,6 @@
 # Fish Fin Voice - Beta 0.1 POLSKI
 
-Fish Fin Voice to lokalna aplikacja desktopowa (Electron + Python) do generowania lektora AI dla audiobooków i materialow wideo. Projekt laczy synteze mowy TTS, obrobke tekstu, prace na napisach oraz automatyzacje pipeline'u audio.
+Fish Fin Voice to lokalna aplikacja desktopowa (Electron + Python) do generowania lektora AI dla audiobooków i materialow wideo. Projekt łączy synteze mowy TTS, obrobke tekstu, prace na napisach oraz automatyzacje pipeline'u audio.
 
 ## Co potrafi aplikacja
 - generowanie audiobookow z tekstu (TXT/EPUB/PDF),
