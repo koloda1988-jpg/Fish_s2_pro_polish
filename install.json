@@ -6,6 +6,7 @@
     "venv_dir": "{{path.resolve(path.this, 'venv')}}",
     "requirements_file": "{{path.resolve(path.this, 'requirements.txt')}}"
   },
+  "pre": [],
   "run": [
     {
       "id": "clone-repo-if-needed",
@@ -40,5 +41,6 @@
         "message": "npm install"
       }
     }
-  ]
+  ],
+  "post": []
 }

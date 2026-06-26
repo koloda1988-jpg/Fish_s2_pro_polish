@@ -9,6 +9,7 @@
     "PYTHONIOENCODING": "utf-8",
     "ELECTRON_DISABLE_SECURITY_WARNINGS": "true"
   },
+  "pre": [],
   "run": [
     {
       "id": "start-electron-app",
@@ -18,5 +19,6 @@
         "message": "npm start"
       }
     }
-  ]
+  ],
+  "post": []
 }
