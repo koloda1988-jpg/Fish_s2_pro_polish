@@ -27,18 +27,18 @@
     },
     {
       "id": "install-python-requirements",
-      "method": "shell.run",
+      "method": "pip.install",
       "params": {
         "path": "{{path.this}}",
-        "message": "{{platform === 'win32' ? 'venv\\\\Scripts\\\\python.exe -m pip install -r requirements.txt' : './venv/bin/python -m pip install -r requirements.txt'}}"
+        "venv": "{{path.resolve(path.this, 'venv')}}",
+        "requirements": "{{path.resolve(path.this, 'requirements.txt')}}"
       }
     },
     {
       "id": "install-node-dependencies",
-      "method": "shell.run",
+      "method": "npm.install",
       "params": {
-        "path": "{{path.this}}",
-        "message": "npm install"
+        "path": "{{path.this}}"
       }
     }
   ],

@@ -8,14 +8,26 @@ module.exports = {
   menu: async () => {
     const root = __dirname;
     const hasVenv = fs.existsSync(path.resolve(root, 'venv'));
+    const hasDotVenv = fs.existsSync(path.resolve(root, '.venv'));
+    const hasPythonEnv = hasVenv || hasDotVenv;
     const hasNodeModules = fs.existsSync(path.resolve(root, 'node_modules'));
-    const installed = hasVenv || hasNodeModules;
+    const installed = hasNodeModules && hasPythonEnv;
+
+    if (!installed) {
+      return [
+        {
+          text: 'Zainstaluj',
+          icon: 'fa-solid fa-download',
+          href: 'install.json'
+        }
+      ];
+    }
 
     return [
       {
-        text: installed ? 'Uruchom' : 'Zainstaluj',
-        icon: installed ? 'fa-solid fa-play' : 'fa-solid fa-download',
-        href: installed ? 'start.json' : 'install.json'
+        text: 'Uruchom aplikacje',
+        icon: 'fa-solid fa-play',
+        href: 'start.json'
       }
     ];
   }
