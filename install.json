@@ -1,33 +1,24 @@
 {
   "title": "Install Fish Fin Voice",
-  "description": "Konfiguruje oficjalny flow Pinokio: Conda + Pip + Npm.",
-  "env": {
-    "app_dir": "{{path.this}}",
-    "env_dir": "{{path.resolve(path.this, 'env')}}",
-    "requirements_file": "{{path.resolve(path.this, 'requirements.txt')}}"
-  },
-  "pre": [],
+  "description": "Automatyczna instalacja środowiska i zależności.",
   "run": [
     {
-      "method": "conda.create",
+      "method": "shell.run",
       "params": {
-        "name": "env",
-        "version": "3.10"
+        "message": "python -m venv venv"
       }
     },
     {
-      "method": "pip.install",
+      "method": "shell.run",
       "params": {
-        "name": "env",
-        "path": "{{env.requirements_file}}"
+        "message": "{{platform === 'win32' ? 'venv\\\\Scripts\\\\activate && pip install -r requirements.txt' : 'source venv/bin/activate && pip install -r requirements.txt'}}"
       }
     },
     {
-      "method": "npm.install",
+      "method": "shell.run",
       "params": {
-        "path": "{{env.app_dir}}"
+        "message": "npm install"
       }
     }
-  ],
-  "post": []
+  ]
 }
