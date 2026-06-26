@@ -19,13 +19,13 @@
       "method": "pip.install",
       "params": {
         "name": "env",
-        "path": "requirements.txt"
+        "path": "{{env.requirements_file}}"
       }
     },
     {
       "method": "npm.install",
       "params": {
-        "path": "."
+        "path": "{{env.app_dir}}"
       }
     }
   ],
