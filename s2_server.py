@@ -44,6 +44,7 @@ import time
 import hashlib
 import logging
 import threading
+import fnmatch
 from pathlib import Path
 from typing import Optional
 
@@ -136,6 +137,97 @@ _engine = None             # TTSInferenceEngine
 _engine_lock = threading.Lock()  # serialise inference (GPU does one at a time)
 _ref_cache: dict[str, bytes] = {}  # hash -> ref_bytes (avoid duplicates in memory)
 _abort_requested = False   # set by POST /abort; cleared after use
+
+HF_REPO_ID = os.environ.get("S2_HF_REPO_ID", "fishaudio/fish-speech-1.5").strip()
+HF_ALLOW_PATTERNS = [
+    "config.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "special_tokens_map.json",
+    "chat_template.jinja",
+    "codec.pth",
+    "model.pth",
+    "model.safetensors",
+    "*.ckpt",
+    "*.bin",
+    "*.safetensors",
+    "firefly-gan-vq-fsq-8x1024-21hz-generator.pth",
+]
+
+
+def _has_pattern_file(model_dir: Path, patterns: list[str]) -> bool:
+    for p in model_dir.iterdir():
+        if not p.is_file():
+            continue
+        name = p.name
+        for pattern in patterns:
+            if fnmatch.fnmatch(name, pattern):
+                return True
+    return False
+
+
+def _model_artifacts_ok(model_dir: Path) -> tuple[bool, list[str]]:
+    """Checks whether model_dir contains minimum files required to bootstrap S2."""
+    if not model_dir.is_dir():
+        return False, ["directory does not exist"]
+
+    missing: list[str] = []
+
+    required_files = [
+        "config.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "special_tokens_map.json",
+    ]
+    for name in required_files:
+        if not (model_dir / name).is_file():
+            missing.append(name)
+
+    has_lm_weights = _has_pattern_file(model_dir, ["*.pth", "*.ckpt", "*.safetensors", "*.bin"])
+    if not has_lm_weights:
+        missing.append("LM weights (*.pth/*.ckpt/*.safetensors/*.bin)")
+
+    # Decoder checkpoint can be next to model or in parent folder.
+    try:
+        _resolve_decoder(model_dir)
+    except FileNotFoundError:
+        missing.append("decoder checkpoint (codec.pth / firefly-gan... / decoder.pth / vocoder.pth)")
+
+    return len(missing) == 0, missing
+
+
+def _ensure_model_downloaded(model_dir: Path) -> None:
+    """Downloads missing model artifacts from Hugging Face only when needed."""
+    ok, missing = _model_artifacts_ok(model_dir)
+    if ok:
+        log.info("Model artifacts detected locally in %s, skipping download.", model_dir)
+        return
+
+    model_dir.mkdir(parents=True, exist_ok=True)
+    missing_text = ", ".join(missing) if missing else "unknown"
+    print("[s2] Wykryto brak modelu lokalnego. Rozpoczynam automatyczne pobieranie z Hugging Face...")
+    log.warning("Missing model artifacts in %s: %s", model_dir, missing_text)
+    log.info("Downloading repo '%s' to %s", HF_REPO_ID, model_dir)
+    try:
+        from huggingface_hub import snapshot_download
+
+        snapshot_download(
+            repo_id=HF_REPO_ID,
+            local_dir=str(model_dir),
+            allow_patterns=HF_ALLOW_PATTERNS,
+            local_dir_use_symlinks=False,
+        )
+    except Exception as e:
+        raise RuntimeError(
+            f"Automatic model download failed from Hugging Face repo '{HF_REPO_ID}': {e}"
+        ) from e
+
+    ok_after, missing_after = _model_artifacts_ok(model_dir)
+    if not ok_after:
+        raise FileNotFoundError(
+            "Downloaded model is still incomplete. Missing: " + ", ".join(missing_after)
+        )
+    log.info("Model download finished and artifacts are complete.")
 
 
 def _resolve_decoder(model_dir: Path) -> Path:
@@ -265,8 +357,7 @@ def _load_engine():
         attention = "sdpa"
 
     model_dir = Path(MODEL_PATH).resolve()
-    if not model_dir.is_dir():
-        raise FileNotFoundError(f"S2_MODEL_PATH does not exist: {model_dir}")
+    _ensure_model_downloaded(model_dir)
 
     decoder_ckpt = _resolve_decoder(model_dir)
     decoder_device = DECODER_DEVICE_CFG
