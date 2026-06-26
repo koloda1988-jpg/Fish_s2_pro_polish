@@ -4,51 +4,18 @@
   "env": {
     "app_dir": "{{path.this}}",
     "venv_dir": "{{path.resolve(path.this, 'venv')}}",
+    "PINOKIO_VENV_PYTHON": "{{platform === 'win32' ? path.resolve(path.this, 'venv', 'Scripts', 'python.exe') : path.resolve(path.this, 'venv', 'bin', 'python')}}",
     "PYTHONUNBUFFERED": "1",
     "PYTHONIOENCODING": "utf-8",
     "ELECTRON_DISABLE_SECURITY_WARNINGS": "true"
   },
-  "steps": [
+  "run": [
     {
-      "id": "start-electron-app-windows",
-      "when": "{{ platform === 'win32' }}",
-      "method": "npm.start",
+      "id": "start-electron-app",
+      "method": "shell.run",
       "params": {
-        "cwd": "{{path.this}}",
-        "env": {
-          "PINOKIO_VENV_PYTHON": "{{path.resolve(path.this, 'venv', 'Scripts', 'python.exe')}}",
-          "PYTHONUNBUFFERED": "1",
-          "PYTHONIOENCODING": "utf-8",
-          "ELECTRON_DISABLE_SECURITY_WARNINGS": "true"
-        }
-      }
-    },
-    {
-      "id": "start-electron-app-linux",
-      "when": "{{ platform === 'linux' }}",
-      "method": "npm.start",
-      "params": {
-        "cwd": "{{path.this}}",
-        "env": {
-          "PINOKIO_VENV_PYTHON": "{{path.resolve(path.this, 'venv', 'bin', 'python')}}",
-          "PYTHONUNBUFFERED": "1",
-          "PYTHONIOENCODING": "utf-8",
-          "ELECTRON_DISABLE_SECURITY_WARNINGS": "true"
-        }
-      }
-    },
-    {
-      "id": "start-electron-app-macos",
-      "when": "{{ platform === 'darwin' }}",
-      "method": "npm.start",
-      "params": {
-        "cwd": "{{path.this}}",
-        "env": {
-          "PINOKIO_VENV_PYTHON": "{{path.resolve(path.this, 'venv', 'bin', 'python')}}",
-          "PYTHONUNBUFFERED": "1",
-          "PYTHONIOENCODING": "utf-8",
-          "ELECTRON_DISABLE_SECURITY_WARNINGS": "true"
-        }
+        "path": "{{path.this}}",
+        "message": "npm start"
       }
     }
   ]

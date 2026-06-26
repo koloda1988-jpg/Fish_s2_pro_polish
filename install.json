@@ -6,7 +6,7 @@
     "venv_dir": "{{path.resolve(path.this, 'venv')}}",
     "requirements_file": "{{path.resolve(path.this, 'requirements.txt')}}"
   },
-  "steps": [
+  "run": [
     {
       "id": "clone-repo-if-needed",
       "method": "git.clone",
@@ -17,46 +17,27 @@
       }
     },
     {
-      "id": "create-python-venv-windows",
-      "when": "{{ platform === 'win32' }}",
+      "id": "create-python-venv",
       "method": "shell.run",
       "params": {
-        "cwd": "{{path.this}}",
-        "message": "python -m venv \"{{path.resolve(path.this, 'venv')}}\""
-      }
-    },
-    {
-      "id": "create-python-venv-linux",
-      "when": "{{ platform === 'linux' }}",
-      "method": "shell.run",
-      "params": {
-        "cwd": "{{path.this}}",
-        "message": "python3 -m venv \"{{path.resolve(path.this, 'venv')}}\""
-      }
-    },
-    {
-      "id": "create-python-venv-macos",
-      "when": "{{ platform === 'darwin' }}",
-      "method": "shell.run",
-      "params": {
-        "cwd": "{{path.this}}",
-        "message": "python3 -m venv \"{{path.resolve(path.this, 'venv')}}\""
+        "path": "{{path.this}}",
+        "message": "{{platform === 'win32' ? 'python -m venv \"' + path.resolve(path.this, 'venv') + '\"' : 'python3 -m venv \"' + path.resolve(path.this, 'venv') + '\"'}}"
       }
     },
     {
       "id": "install-python-requirements",
-      "method": "pip.install",
+      "method": "shell.run",
       "params": {
-        "cwd": "{{path.this}}",
-        "venv": "{{path.resolve(path.this, 'venv')}}",
-        "requirements": "{{path.resolve(path.this, 'requirements.txt')}}"
+        "path": "{{path.this}}",
+        "message": "{{platform === 'win32' ? '\\"' + path.resolve(path.this, 'venv', 'Scripts', 'python.exe') + '\\" -m pip install -r \\"' + path.resolve(path.this, 'requirements.txt') + '\\"' : '\\"' + path.resolve(path.this, 'venv', 'bin', 'python') + '\\" -m pip install -r \\"' + path.resolve(path.this, 'requirements.txt') + '\\"'}}"
       }
     },
     {
       "id": "install-node-dependencies",
-      "method": "npm.install",
+      "method": "shell.run",
       "params": {
-        "cwd": "{{path.this}}"
+        "path": "{{path.this}}",
+        "message": "npm install"
       }
     }
   ]
