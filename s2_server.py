@@ -138,7 +138,7 @@ _engine_lock = threading.Lock()  # serialise inference (GPU does one at a time)
 _ref_cache: dict[str, bytes] = {}  # hash -> ref_bytes (avoid duplicates in memory)
 _abort_requested = False   # set by POST /abort; cleared after use
 
-HF_REPO_ID = os.environ.get("S2_HF_REPO_ID", "fishaudio/fish-speech-1.5").strip()
+HF_REPO_ID = os.environ.get("S2_HF_REPO_ID", "fishaudio/s2-pro").strip()
 HF_ALLOW_PATTERNS = [
     "config.json",
     "tokenizer.json",
