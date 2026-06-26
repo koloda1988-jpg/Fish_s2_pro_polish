@@ -7,11 +7,9 @@ module.exports = {
   icon: 'pinokio-icon.svg',
   menu: async () => {
     const root = __dirname;
-    const hasVenv = fs.existsSync(path.resolve(root, 'venv'));
-    const hasDotVenv = fs.existsSync(path.resolve(root, '.venv'));
-    const hasPythonEnv = hasVenv || hasDotVenv;
+    const hasEnv = fs.existsSync(path.resolve(root, 'env'));
     const hasNodeModules = fs.existsSync(path.resolve(root, 'node_modules'));
-    const installed = hasNodeModules && hasPythonEnv;
+    const installed = hasNodeModules && hasEnv;
 
     if (!installed) {
       return [

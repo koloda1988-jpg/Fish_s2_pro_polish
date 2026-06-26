@@ -1,10 +1,11 @@
 {
   "title": "Start Fish Fin Voice",
-  "description": "Uruchamia aplikacje Electron z platform-aware konfiguracja lokalnego venv dla Windows, Linux i macOS.",
+  "description": "Uruchamia aplikacje Electron z wykorzystaniem srodowiska Conda env.",
   "env": {
     "app_dir": "{{path.this}}",
-    "venv_dir": "{{path.resolve(path.this, 'venv')}}",
-    "PINOKIO_VENV_PYTHON": "{{platform === 'win32' ? path.resolve(path.this, 'venv', 'Scripts', 'python.exe') : path.resolve(path.this, 'venv', 'bin', 'python')}}",
+    "env_dir": "{{path.resolve(path.this, 'env')}}",
+    "PINOKIO_CONDA_ENV": "env",
+    "PINOKIO_VENV_PYTHON": "{{platform === 'win32' ? path.resolve(path.this, 'env', 'python.exe') : path.resolve(path.this, 'env', 'bin', 'python')}}",
     "PYTHONUNBUFFERED": "1",
     "PYTHONIOENCODING": "utf-8",
     "ELECTRON_DISABLE_SECURITY_WARNINGS": "true"

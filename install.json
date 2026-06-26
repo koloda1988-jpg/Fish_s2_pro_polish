@@ -1,44 +1,31 @@
 {
   "title": "Install Fish Fin Voice",
-  "description": "Konfiguruje repozytorium, lokalne venv Python 3.10 oraz zaleznosci Python i Node.js na Windows, Linux i macOS.",
+  "description": "Konfiguruje oficjalny flow Pinokio: Conda + Pip + Npm.",
   "env": {
     "app_dir": "{{path.this}}",
-    "venv_dir": "{{path.resolve(path.this, 'venv')}}",
+    "env_dir": "{{path.resolve(path.this, 'env')}}",
     "requirements_file": "{{path.resolve(path.this, 'requirements.txt')}}"
   },
   "pre": [],
   "run": [
     {
-      "id": "clone-repo-if-needed",
-      "method": "git.clone",
+      "method": "conda.create",
       "params": {
-        "url": "https://github.com/koloda1988-jpg/Fish_s2_pro_polish.git",
-        "path": "{{path.this}}",
-        "skipIfExists": true
+        "name": "env",
+        "version": "3.10"
       }
     },
     {
-      "id": "create-python-venv",
-      "method": "shell.run",
-      "params": {
-        "path": "{{path.this}}",
-        "message": "{{platform === 'win32' ? 'python -m venv venv' : 'python3 -m venv venv'}}"
-      }
-    },
-    {
-      "id": "install-python-requirements",
       "method": "pip.install",
       "params": {
-        "path": "{{path.this}}",
-        "venv": "venv",
-        "requirements": "requirements.txt"
+        "name": "env",
+        "path": "requirements.txt"
       }
     },
     {
-      "id": "install-node-dependencies",
       "method": "npm.install",
       "params": {
-        "path": "{{path.this}}"
+        "path": "."
       }
     }
   ],
