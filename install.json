@@ -30,8 +30,8 @@
       "method": "pip.install",
       "params": {
         "path": "{{path.this}}",
-        "venv": "{{path.resolve(path.this, 'venv')}}",
-        "requirements": "{{path.resolve(path.this, 'requirements.txt')}}"
+        "venv": "venv",
+        "requirements": "requirements.txt"
       }
     },
     {
