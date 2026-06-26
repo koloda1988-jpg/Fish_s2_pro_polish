@@ -21,7 +21,7 @@
       "method": "shell.run",
       "params": {
         "path": "{{path.this}}",
-        "message": "{{platform === 'win32' ? 'python -m venv \"' + path.resolve(path.this, 'venv') + '\"' : 'python3 -m venv \"' + path.resolve(path.this, 'venv') + '\"'}}"
+        "message": "{{platform === 'win32' ? 'python -m venv venv' : 'python3 -m venv venv'}}"
       }
     },
     {
@@ -29,7 +29,7 @@
       "method": "shell.run",
       "params": {
         "path": "{{path.this}}",
-        "message": "{{platform === 'win32' ? '\\"' + path.resolve(path.this, 'venv', 'Scripts', 'python.exe') + '\\" -m pip install -r \\"' + path.resolve(path.this, 'requirements.txt') + '\\"' : '\\"' + path.resolve(path.this, 'venv', 'bin', 'python') + '\\" -m pip install -r \\"' + path.resolve(path.this, 'requirements.txt') + '\\"'}}"
+        "message": "{{platform === 'win32' ? 'venv\\\\Scripts\\\\python.exe -m pip install -r requirements.txt' : './venv/bin/python -m pip install -r requirements.txt'}}"
       }
     },
     {
