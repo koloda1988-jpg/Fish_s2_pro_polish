@@ -30,6 +30,11 @@ module.exports = {
         href: 'start.json'
       },
       {
+        text: 'Aktualizuj',
+        icon: 'fa-solid fa-rotate',
+        href: 'update.json'
+      },
+      {
         text: 'Odinstaluj',
         icon: 'fa-solid fa-trash',
         href: 'uninstall.json'

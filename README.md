@@ -85,6 +85,7 @@ Repo zawiera gotowy launcher Pinokio do instalacji jednym kliknieciem:
 - `pinokio.js`
 - `install.json`
 - `start.json`
+- `update.json`
 - `uninstall.json`
 
 ## Quick Start
@@ -106,7 +107,8 @@ One-click flow w Pinokio:
 1. Otworz repo w Pinokio.
 2. Kliknij `Zainstaluj`.
 3. Po zakonczeniu kliknij `Uruchom`.
-4. Aby usunac aplikacje z Pinokio, kliknij `Odinstaluj` (akcja z `uninstall.json`).
+4. Kliknij `Aktualizuj`, aby pobrac nowe pliki projektu z Git (bez kasowania `venv` i `models`).
+5. Aby usunac aplikacje z Pinokio, kliknij `Odinstaluj` (akcja z `uninstall.json`).
 
 Awaryjnie (gdy pliki sa zablokowane, np. `EBUSY`), uruchom recznie w PowerShell:
 

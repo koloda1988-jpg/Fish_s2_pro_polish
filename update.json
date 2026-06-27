@@ -1,0 +1,20 @@
+{
+  "title": "Update Fish Fin Voice",
+  "description": "Pobiera najnowsze pliki projektu z Git bez ruszania lokalnych modeli i venv.",
+  "run": [
+    {
+      "method": "shell.run",
+      "params": {
+        "path": "{{path.this}}",
+        "message": "git fetch origin"
+      }
+    },
+    {
+      "method": "shell.run",
+      "params": {
+        "path": "{{path.this}}",
+        "message": "git pull --ff-only origin master"
+      }
+    }
+  ]
+}
