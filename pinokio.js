@@ -4,7 +4,7 @@ const path = require('path');
 module.exports = {
   title: 'Fish Fin Voice',
   description: 'Lokalny generator audiobooków i lektora AI (Wsparcie dla PL)',
-  icon: 'pinokio-icon.svg',
+  icon: 'pinokio-icon.png',
   menu: async () => {
     const root = __dirname;
     const hasVenv = fs.existsSync(path.resolve(root, 'venv'));
