@@ -154,6 +154,13 @@ HF_ALLOW_PATTERNS = [
     "firefly-gan-vq-fsq-8x1024-21hz-generator.pth",
 ]
 
+DECODER_CKPT_NAMES = {
+    "codec.pth",
+    "firefly-gan-vq-fsq-8x1024-21hz-generator.pth",
+    "decoder.pth",
+    "vocoder.pth",
+}
+
 
 def _has_pattern_file(model_dir: Path, patterns: list[str]) -> bool:
     for p in model_dir.iterdir():
@@ -163,6 +170,20 @@ def _has_pattern_file(model_dir: Path, patterns: list[str]) -> bool:
         for pattern in patterns:
             if fnmatch.fnmatch(name, pattern):
                 return True
+    return False
+
+
+def _has_lm_weights(model_dir: Path) -> bool:
+    """True only when text2semantic LM weights exist (decoder-only files do not count)."""
+    lm_ext = {".pth", ".ckpt", ".safetensors", ".bin"}
+    for p in model_dir.iterdir():
+        if not p.is_file():
+            continue
+        name = p.name
+        if name in DECODER_CKPT_NAMES:
+            continue
+        if p.suffix.lower() in lm_ext:
+            return True
     return False
 
 
@@ -183,9 +204,9 @@ def _model_artifacts_ok(model_dir: Path) -> tuple[bool, list[str]]:
         if not (model_dir / name).is_file():
             missing.append(name)
 
-    has_lm_weights = _has_pattern_file(model_dir, ["*.pth", "*.ckpt", "*.safetensors", "*.bin"])
+    has_lm_weights = _has_lm_weights(model_dir)
     if not has_lm_weights:
-        missing.append("LM weights (*.pth/*.ckpt/*.safetensors/*.bin)")
+        missing.append("LM weights (model*.pth / model*.safetensors / *.ckpt / *.bin)")
 
     # Decoder checkpoint can be next to model or in parent folder.
     try:
