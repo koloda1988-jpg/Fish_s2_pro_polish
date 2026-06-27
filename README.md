@@ -86,6 +86,17 @@ Repo zawiera gotowy launcher Pinokio do instalacji jednym kliknieciem:
 - `install.json`
 - `start.json`
 
+## Quick Start
+
+### Pinokio - 1-Click Install (Recommended for All Users!)
+The easiest way to get Fish Fin Voice up and running on any platform - no terminal, no manual setup:
+
+[![Install with Pinokio](https://img.shields.io/badge/%E2%9A%A1_Install_with_Pinokio-One_Click-ff69b4?style=for-the-badge&labelColor=1a1a1a)](https://beta.pinokio.co/apps/github-com-koloda1988-jpg-fish-s2-pro-polish)
+
+> [Pinokio](https://pinokio.computer/) handles everything automatically: Python, Node.js, dependencies, model downloads, and launching. Just click install and run.
+
+Repo link: https://github.com/koloda1988-jpg/Fish_s2_pro_polish
+
 Workflow Pinokio:
 1. Install: przygotowuje srodowisko per platforma (Windows/Linux/macOS), tworzy lokalne `venv`, instaluje `requirements.txt` oraz `npm install`.
 2. Start: uruchamia Electron przez `start.json`, a aplikacja samodzielnie odpala backend Python z lokalnego `venv`.
