@@ -1,0 +1,13 @@
+{
+  "title": "Uninstall Fish Fin Voice",
+  "description": "Zatrzymuje procesy Electron/Node i usuwa folder aplikacji z Pinokio.",
+  "run": [
+    {
+      "method": "shell.run",
+      "params": {
+        "path": "{{path.resolve(path.this, '..')}}",
+        "message": "{{platform === 'win32' ? 'powershell -NoProfile -ExecutionPolicy Bypass -Command \"$app=\\\"{{path.this}}\\\"; taskkill /F /IM electron.exe /T; taskkill /F /IM node.exe /T; Remove-Item -LiteralPath $app -Recurse -Force\"' : 'pkill -f electron ; pkill -f node ; rm -rf \"{{path.this}}\"'}}"
+      }
+    }
+  ]
+}

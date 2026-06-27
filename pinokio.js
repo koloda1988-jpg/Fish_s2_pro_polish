@@ -28,6 +28,11 @@ module.exports = {
         text: 'Uruchom aplikacje',
         icon: 'fa-solid fa-play',
         href: 'start.json'
+      },
+      {
+        text: 'Odinstaluj',
+        icon: 'fa-solid fa-trash',
+        href: 'uninstall.json'
       }
     ];
   }

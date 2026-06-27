@@ -85,6 +85,7 @@ Repo zawiera gotowy launcher Pinokio do instalacji jednym kliknieciem:
 - `pinokio.js`
 - `install.json`
 - `start.json`
+- `uninstall.json`
 
 ## Quick Start
 
@@ -105,6 +106,16 @@ One-click flow w Pinokio:
 1. Otworz repo w Pinokio.
 2. Kliknij `Zainstaluj`.
 3. Po zakonczeniu kliknij `Uruchom`.
+4. Aby usunac aplikacje z Pinokio, kliknij `Odinstaluj` (akcja z `uninstall.json`).
+
+Awaryjnie (gdy pliki sa zablokowane, np. `EBUSY`), uruchom recznie w PowerShell:
+
+```powershell
+taskkill /F /IM pinokio.exe /T
+taskkill /F /IM electron.exe /T
+taskkill /F /IM node.exe /T
+Remove-Item -LiteralPath "K:\pinokio\api\fish-s2-pro-polish" -Recurse -Force
+```
 
 ## Budowa instalatora Windows
 Konfiguracja NSIS jest gotowa w projekcie.
