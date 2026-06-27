@@ -5,7 +5,8 @@
     {
       "method": "shell.run",
       "params": {
-        "message": "taskkill /F /IM electron.exe /T & taskkill /F /IM node.exe /T & cmd /c rd /s /q \"{{path.this}}\""
+        "path": "{{path.this}}",
+        "message": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$app=(Get-Location).Path; taskkill /F /IM electron.exe /T 2>$null; taskkill /F /IM node.exe /T 2>$null; Set-Location ..; Remove-Item -LiteralPath $app -Recurse -Force -ErrorAction SilentlyContinue\""
       }
     }
   ]
