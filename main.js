@@ -1260,6 +1260,7 @@ app.whenReady().then(async () => {
   splashOpenTime = Date.now();
 
   try {
+    let s2Ready = false;
     // Check whether s2_server is already running (left from previous session)
     setSplashStatus('Checking if TTS server is already running…');
     let alreadyRunning = false;
@@ -1274,6 +1275,7 @@ app.whenReady().then(async () => {
       });
       if (quickCheck) {
         alreadyRunning = true;
+        s2Ready = true;
         console.log('[main] s2_server already running — skipping spawn:', quickCheck);
         setSplashStatus('TTS server already loaded in VRAM — quick start!');
         setSplashProgress(100);
@@ -1295,27 +1297,44 @@ app.whenReady().then(async () => {
         const healthBody = await pollHealth();
         clearInterval(progInterval);
         setSplashProgress(100);
+        s2Ready = true;
         console.log('[main] s2_server health body:', healthBody);
       } catch (err) {
         clearInterval(progInterval);
-        throw err;
+        s2Ready = false;
+        const msg = `TTS server unavailable at startup (${err.message}). App will continue in limited mode; use Models tab to download/repair model and restart TTS.`;
+        console.error('[boot] s2 startup warning:', err);
+        setSplashError(msg);
+        sendLog('[WARN] ' + msg);
       }
     }
 
-    setSplashStatus('Server ready. Launching UI…');
+    setSplashStatus(s2Ready ? 'Server ready. Launching UI…' : 'Launching UI in limited mode…');
 
     const splashElapsed = Date.now() - splashOpenTime;
     if (splashElapsed < MIN_SPLASH_MS) {
       await new Promise(r => setTimeout(r, MIN_SPLASH_MS - splashElapsed));
     }
 
-    startPythonBackend();
+    try {
+      startPythonBackend();
+    } catch (backendErr) {
+      console.error('[boot] Python backend warning:', backendErr);
+      sendLog('[WARN] Python backend failed to start: ' + backendErr.message);
+      setSplashError('Python backend failed to start. UI will open, but features may be limited.');
+    }
     createMainWindow();
   } catch (err) {
     console.error('[boot] Failed:', err);
-    setSplashError(err.message);
-    // Keep splash open with message for 5 s, then quit app
-    setTimeout(() => app.quit(), 5000);
+    const msg = `Startup error: ${err.message}. Opening UI in recovery mode.`;
+    setSplashError(msg);
+    sendLog('[WARN] ' + msg);
+    try {
+      createMainWindow();
+    } catch (uiErr) {
+      console.error('[boot] UI recovery failed:', uiErr);
+      setTimeout(() => app.quit(), 5000);
+    }
   }
 });
 
